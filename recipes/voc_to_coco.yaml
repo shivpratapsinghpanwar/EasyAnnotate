@@ -1,0 +1,76 @@
+# A complete dataset build, from a messy annotation folder to a COCO export.
+#
+#   datafactory run recipes/voc_to_coco.yaml --set root=D:/my/data --set out=D:/my/build --dry-run
+#   datafactory run recipes/voc_to_coco.yaml --set root=D:/my/data --set out=D:/my/build
+#
+# Preview first. Steps 2-5 change files on disk.
+
+name: voc-to-coco
+description: Audit, clean, renumber, split and export a Pascal VOC folder to COCO.
+
+vars:
+  root: ./dataset          # folder of image + .xml pairs, overridden with --set
+  out: ./build             # where splits and the COCO export are written
+  prefix: img              # filename prefix for the renumbering step
+
+steps:
+  # Always look before touching anything. This step changes nothing.
+  - name: audit before
+    op: inspect.dataset
+    with:
+      folder: "${root}"
+      check_duplicates: exact
+
+  # A label whose image is gone is pure dead weight.
+  - name: drop labels with no image
+    op: clean.orphans
+    with:
+      folder: "${root}"
+      scope: labels
+      action: delete
+
+  # Fix class-name case drift at the source, so the export cannot split a class.
+  - name: unify class name case
+    op: labels.rename
+    with:
+      folder: "${root}"
+      fold_case: true
+
+  # Visually similar frames, not just byte-identical ones. The labelled copy wins.
+  - name: remove near-duplicates
+    op: clean.dedup
+    with:
+      folders: "${root}"
+      method: phash
+      threshold: 8
+      action: move
+      keep: annotated
+
+  - name: renumber pairs
+    op: clean.rename
+    with:
+      folder: "${root}"
+      prefix: "${prefix}"
+      pad: 4
+
+  # Seeded and stratified, so the split is reproducible and class-balanced.
+  - name: split
+    op: dataset.split
+    with:
+      folder: "${root}"
+      output: "${out}/splits"
+      ratios: "0.8,0.1,0.1"
+      seed: 42
+
+  - name: export coco
+    op: export.coco
+    with:
+      folder: "${out}/splits"
+      output: "${out}/Dataset_COCO"
+      splits: "train,val,test"
+
+  # Confirm the export is what you expect before training on it.
+  - name: audit the export
+    op: inspect.coco
+    with:
+      file: "${out}/Dataset_COCO/annotations/instances_train.json"

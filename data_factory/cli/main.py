@@ -1,0 +1,341 @@
+"""The command line, generated from the operation registry.
+
+Every subcommand and every flag below is derived from what an operation
+declares about itself. Nothing here knows what dedup or splitting actually do,
+which is why adding an operation never means editing this file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import time
+from pathlib import Path
+from typing import Any, Sequence, TextIO
+
+from .. import __version__
+from ..core import ops  # noqa: F401  -- imported for registration side effects
+from ..core import registry
+from ..core.registry import Operation, ParamError
+from ..core.types import Cancelled, Context
+from . import render
+
+PROGRAM = "datafactory"
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog=PROGRAM,
+        description=(
+            "Data Factory -- one tool for computer-vision dataset preparation. "
+            f"Run '{PROGRAM}' with no arguments for an interactive menu."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog=(
+            "examples:\n"
+            f"  {PROGRAM} inspect.dataset --folder ./data\n"
+            f"  {PROGRAM} clean.dedup --folders ./a ./b --method phash --dry-run\n"
+            f"  {PROGRAM} export.coco --folder ./voc --output ./coco\n"
+            f"  {PROGRAM} run recipes/door.yaml\n"
+        ),
+    )
+    parser.add_argument("--version", action="version", version=f"{PROGRAM} {__version__}")
+    subparsers = parser.add_subparsers(dest="command")
+
+    listing = subparsers.add_parser("list", help="list every available operation")
+    listing.set_defaults(_handler=_cmd_list)
+
+    explain = subparsers.add_parser("explain", help="show full help for one operation")
+    explain.add_argument("operation", help="operation name, e.g. clean.dedup")
+    explain.set_defaults(_handler=_cmd_explain)
+
+    schema = subparsers.add_parser(
+        "schema", help="dump the machine-readable operation schema (for a web UI)"
+    )
+    schema.add_argument("--output", type=Path, help="write to this file instead of stdout")
+    schema.set_defaults(_handler=_cmd_schema)
+
+    recipe = subparsers.add_parser("run", help="run a YAML or JSON recipe of steps")
+    recipe.add_argument("recipe", type=Path, help="path to the recipe file")
+    _add_common_flags(recipe)
+    recipe.add_argument(
+        "--set",
+        dest="overrides",
+        action="append",
+        metavar="KEY=VALUE",
+        help="override a recipe variable, e.g. --set root=D:/data (repeatable)",
+    )
+    recipe.add_argument(
+        "--continue-on-error", action="store_true", help="keep going after a failing step"
+    )
+    recipe.set_defaults(_handler=_cmd_run_recipe)
+
+    menu = subparsers.add_parser("menu", help="interactive menu")
+    menu.set_defaults(_handler=_cmd_menu)
+
+    for operation in registry.all_operations():
+        _add_operation_parser(subparsers, operation)
+
+    return parser
+
+
+def _add_common_flags(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--dry-run", action="store_true", help="show what would happen without changing anything"
+    )
+    parser.add_argument("--json", action="store_true", help="emit the result as JSON")
+    parser.add_argument("--verbose", action="store_true", help="list every action taken")
+    parser.add_argument("--quiet", action="store_true", help="suppress the progress display")
+    parser.add_argument(
+        "--yes", "-y", action="store_true", help="skip the confirmation prompt for destructive runs"
+    )
+
+
+def _add_operation_parser(subparsers: Any, operation: Operation) -> None:
+    parser = subparsers.add_parser(
+        operation.name,
+        help=operation.summary,
+        description=f"{operation.title} -- {operation.summary}",
+        epilog=operation.notes,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    for param in operation.params:
+        _add_param_argument(parser, param)
+    _add_common_flags(parser)
+    parser.set_defaults(_handler=_cmd_run_operation, _operation=operation)
+
+
+def _add_param_argument(parser: argparse.ArgumentParser, param: registry.Param) -> None:
+    flag = "--" + param.name.replace("_", "-")
+    help_text = param.help
+    if param.default is not None:
+        help_text += f"  (default: {param.default})"
+
+    if param.kind == "bool":
+        # Both polarities are always available, so a default of True is just as
+        # easy to turn off as a default of False is to turn on.
+        parser.add_argument(flag, dest=param.name, action="store_true", default=None, help=help_text)
+        parser.add_argument(
+            "--no-" + param.name.replace("_", "-"),
+            dest=param.name,
+            action="store_false",
+            default=None,
+            help=argparse.SUPPRESS,
+        )
+        return
+
+    if param.kind in ("dirs", "strs"):
+        parser.add_argument(flag, dest=param.name, nargs="+", default=None, help=help_text)
+        return
+
+    parser.add_argument(
+        flag,
+        dest=param.name,
+        default=None,
+        choices=list(param.choices) if param.choices else None,
+        help=help_text,
+    )
+
+
+# -- commands ---------------------------------------------------------------
+
+def _cmd_list(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    render.render_operation_list(registry.all_operations(), out)
+    return 0
+
+
+def _cmd_explain(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    try:
+        operation = registry.get(args.operation)
+    except KeyError as exc:
+        err.write(f"{exc}\n")
+        return 2
+    render.render_operation_help(operation, out)
+    return 0
+
+
+def _cmd_schema(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    document = json.dumps(registry.schema(), indent=2)
+    if args.output:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(document, encoding="utf-8")
+        out.write(f"schema written to {args.output}\n")
+    else:
+        out.write(document + "\n")
+    return 0
+
+
+def _cmd_menu(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from .menu import run_menu
+
+    return run_menu(out, err)
+
+
+def _cmd_run_operation(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    operation: Operation = args._operation
+    supplied = {
+        param.name: getattr(args, param.name)
+        for param in operation.params
+        if getattr(args, param.name, None) is not None
+    }
+
+    try:
+        bound = operation.bind(supplied)
+    except ParamError as exc:
+        err.write(f"error: {exc}\n")
+        return 2
+
+    if not _confirm(operation, bound, args, err):
+        return 1
+
+    ctx = _make_context(args, err)
+    try:
+        result = operation.run(supplied, ctx)
+    except Cancelled:
+        err.write("\ncancelled\n")
+        return 130
+    except (RuntimeError, OSError) as exc:
+        err.write(f"error: {exc}\n")
+        return 1
+    finally:
+        _clear_progress(args, err)
+
+    render.render_result(result, out, as_json=args.json, verbose=args.verbose)
+    return 0 if result.ok else 1
+
+
+def _cmd_run_recipe(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from ..pipeline import Recipe, RecipeError, run
+
+    overrides: dict[str, str] = {}
+    for item in args.overrides or []:
+        if "=" not in item:
+            err.write(f"error: --set expects KEY=VALUE, got {item!r}\n")
+            return 2
+        key, value = item.split("=", 1)
+        overrides[key.strip()] = value.strip()
+
+    try:
+        recipe = Recipe.load(args.recipe, overrides=overrides)
+    except (RecipeError, OSError, ValueError) as exc:
+        err.write(f"error: {exc}\n")
+        return 2
+
+    destructive = [
+        s
+        for s in recipe.steps
+        if not s.skip
+        and registry.get(s.op).destructive_for(registry.get(s.op).bind(s.params, check_paths=False))
+    ]
+    if destructive and not args.dry_run and not args.yes:
+        names = ", ".join(sorted({s.op for s in destructive}))
+        if not _ask(f"Recipe '{recipe.name}' runs destructive steps ({names}). Continue?", err):
+            err.write("aborted\n")
+            return 1
+
+    ctx = _make_context(args, err)
+
+    def announce(position: int, total: int, step: Any) -> None:
+        if not args.quiet and not args.json:
+            out.write(f"\n[{position}/{total}] {step.label}\n")
+
+    try:
+        report = run(recipe, ctx, continue_on_error=args.continue_on_error, on_step=announce)
+    except Cancelled:
+        err.write("\ncancelled\n")
+        return 130
+    finally:
+        _clear_progress(args, err)
+
+    if args.json:
+        json.dump(report.as_dict(), out, indent=2)
+        out.write("\n")
+    else:
+        for result in report.results:
+            render.render_result(result, out, verbose=args.verbose)
+        if report.stopped_at:
+            err.write(f"recipe stopped at step '{report.stopped_at}'\n")
+    return 0 if report.ok else 1
+
+
+# -- shared helpers ---------------------------------------------------------
+
+def _make_context(args: argparse.Namespace, err: TextIO) -> Context:
+    show_progress = not args.quiet and not args.json and hasattr(err, "isatty") and err.isatty()
+    return Context(dry_run=args.dry_run, progress=_progress_printer(err) if show_progress else None)
+
+
+def _progress_printer(err: TextIO) -> Any:
+    """A single rewriting status line, throttled so it never dominates the run."""
+    state = {"last": 0.0}
+
+    def report(done: int, total: int, message: str = "") -> None:
+        now = time.monotonic()
+        if now - state["last"] < 0.08 and done != total:
+            return
+        state["last"] = now
+        share = f"{done}/{total}" if total else str(done)
+        line = f"  {share}  {message}"[:110]
+        err.write("\r\033[K" + line)
+        err.flush()
+
+    return report
+
+
+def _clear_progress(args: argparse.Namespace, err: TextIO) -> None:
+    if not args.quiet and not args.json and hasattr(err, "isatty") and err.isatty():
+        err.write("\r\033[K")
+        err.flush()
+
+
+def _confirm(
+    operation: Operation, bound: dict[str, Any], args: argparse.Namespace, err: TextIO
+) -> bool:
+    # Judged from the actual parameters: --action report writes nothing, so it
+    # should not demand a confirmation the way --action delete must.
+    if not operation.destructive_for(bound) or args.dry_run or args.yes:
+        return True
+    if not sys.stdin.isatty():
+        err.write(
+            f"error: {operation.name} changes files. Re-run with --dry-run to preview, "
+            "or --yes to confirm in a non-interactive session.\n"
+        )
+        return False
+    return _ask(f"{operation.name} will modify files on disk. Continue?", err)
+
+
+def _ask(question: str, err: TextIO) -> bool:
+    try:
+        answer = input(f"{question} [y/N] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        err.write("\n")
+        return False
+    return answer in ("y", "yes")
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    parser = build_parser()
+
+    # Bare invocation is the friendly path: show the menu rather than a usage error.
+    if not argv:
+        from .menu import run_menu
+
+        return run_menu(sys.stdout, sys.stderr)
+
+    args = parser.parse_args(argv)
+    handler = getattr(args, "_handler", None)
+    if handler is None:
+        parser.print_help()
+        return 0
+
+    try:
+        return handler(args, sys.stdout, sys.stderr)
+    except KeyboardInterrupt:
+        sys.stderr.write("\ninterrupted\n")
+        return 130
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
