@@ -51,10 +51,15 @@ label .h{display:block;font-size:.78rem;color:var(--muted);margin-top:.22rem}
 .stat span{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
 .pill{display:inline-block;font-family:var(--mono);font-size:.72rem;padding:.12rem .45rem;
   border-radius:4px;background:var(--bg);border:1px solid var(--line);margin:0 .3rem .3rem 0}
-.ops{max-height:330px;overflow-y:auto;margin:-.3rem -.3rem .9rem}
+/* A bordered, inset scroll region. Without the frame the list clips mid-item
+   and reads as broken text rather than as something you can scroll. */
+.ops{max-height:320px;overflow-y:auto;margin:0 0 1rem;padding:.45rem;
+  border:1px solid var(--line);border-radius:8px;background:var(--bg)}
+.ops::-webkit-scrollbar{width:9px}
+.ops::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
 .op{padding:.5rem .6rem;border-radius:7px;cursor:pointer;border:1px solid transparent}
-.op:hover{background:var(--bg)}
-.op.sel{background:color-mix(in srgb,var(--accent) 10%,transparent);border-color:var(--accent)}
+.op:hover{background:var(--panel)}
+.op.sel{background:color-mix(in srgb,var(--accent) 14%,transparent);border-color:var(--accent)}
 .op b{display:block;font-family:var(--mono);font-size:.83rem}
 .op span{font-size:.78rem;color:var(--muted)}
 .cat{font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
@@ -353,11 +358,28 @@ function paint(el, job){
            <button onclick="cancel('${job.id}')">Cancel</button></div>` : "");
 }
 
+// A finished run adds a new chainable input, so the form has to re-render to
+// offer it -- but re-rendering naively throws away whatever the user has
+// already typed, which is infuriating right after a long run. Capture, render,
+// restore.
 async function refreshInputs(){
   if(!dataset) return;
   const fresh = await (await api(`/datasets/${dataset.id}`)).json();
   dataset.inputs = fresh.inputs;
+
+  const previous = {};
+  $("form").querySelectorAll("input,select").forEach(el => {
+    previous[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  });
   renderForm();
+  $("form").querySelectorAll("input,select").forEach(el => {
+    if(!(el.name in previous)) return;
+    // Not the output name: reusing it would overwrite the result just made.
+    if(el.name === "__output") return;
+    if(el.type === "checkbox") el.checked = previous[el.name];
+    else if([...(el.options || [])].some(o => o.value === previous[el.name]) || !el.options)
+      el.value = previous[el.name];
+  });
 }
 
 window.download = (output) =>

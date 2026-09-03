@@ -70,7 +70,11 @@ def html_report(params: dict[str, Any], ctx: Context) -> OpResult:
 
     ctx.emit(1, 2, "analysing")
     payload = stats.analyse(dataset)
-    payload["source"] = str(folder)
+    # The folder name, not the full path. A report is made to be shared, and on
+    # a hosted service the absolute path leaks the server's layout and the
+    # dataset's private id to anyone the file is forwarded to. The full path is
+    # still in the JSON sidecar for whoever actually needs it.
+    payload["source"] = folder.name or str(folder)
     ctx.emit(2, 2, "rendering")
 
     heading = params["title"] or folder.name
@@ -82,7 +86,9 @@ def html_report(params: dict[str, Any], ctx: Context) -> OpResult:
         output.write_text(document, encoding="utf-8")
         if params["json_too"]:
             json_path = output.with_suffix(".json")
-            json_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+            json_path.write_text(
+                json.dumps({**payload, "source_path": str(folder)}, indent=2), encoding="utf-8"
+            )
             result.record(Action.WRITE, json_path, json_path, "raw statistics")
 
     totals = payload["totals"]

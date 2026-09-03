@@ -576,6 +576,18 @@ class TestReport:
         run("report.html", {"folder": str(clean_dataset), "output": str(target), "json_too": True})
         payload = json.loads(target.with_suffix(".json").read_text(encoding="utf-8"))
         assert payload["totals"]["images"] == 7
+        # The full path belongs here, where it is not casually shared.
+        assert payload["source_path"] == str(clean_dataset)
+
+    def test_the_report_does_not_leak_the_absolute_path(self, clean_dataset: Path, tmp_path: Path):
+        """A report is made to be forwarded. On a hosted service the absolute
+        path exposes the server layout and the dataset's private id."""
+        target = tmp_path / "r.html"
+        run("report.html", {"folder": str(clean_dataset), "output": str(target)})
+        document = target.read_text(encoding="utf-8")
+        assert str(clean_dataset) not in document
+        assert str(clean_dataset.parent) not in document
+        assert clean_dataset.name in document
 
     def test_dry_run_writes_no_file(self, clean_dataset: Path, tmp_path: Path):
         target = tmp_path / "r.html"
