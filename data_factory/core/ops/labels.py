@@ -132,7 +132,18 @@ def rename_labels(params: dict[str, Any], ctx: Context) -> OpResult:
         }
 
     if not mapping and not drop:
-        result.warnings.append("nothing to do: supply --map, --drop, or --fold-case")
+        # Seed the counters even on the do-nothing path, so a consumer reading
+        # the JSON sees "0 changed" rather than an empty object it has to guess
+        # the meaning of -- the same contract every other operation keeps.
+        result.counts.update(
+            {"label_files": len(files), "files_changed": 0,
+             "objects_renamed": 0, "objects_dropped": 0}
+        )
+        result.warnings.append(
+            "every class name is already consistent, so nothing was changed"
+            if params["fold_case"]
+            else "nothing to do: supply --map, --drop, or --fold-case"
+        )
         return result
 
     renamed = Counter[str]()

@@ -17,7 +17,24 @@ from __future__ import annotations
 
 from typing import Any
 
-__version__ = "0.2.0"
+
+def _detect_version() -> str:
+    """Read the version from installed package metadata.
+
+    Declared once, in pyproject.toml. Hardcoding it here as well guarantees the
+    two drift -- which they had, with the CLI reporting 0.2.0 from a 0.3.0
+    wheel. The fallback covers running from a source checkout that was never
+    installed.
+    """
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("data-factory")
+    except PackageNotFoundError:
+        return "0.0.0+source"
+
+
+__version__ = _detect_version()
 
 from .core import ops as _ops  # noqa: F401  -- registers the operations
 from .core import registry

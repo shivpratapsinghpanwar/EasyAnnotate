@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Data Factory</title>
+<style>
+:root{
+  --bg:#f6f8fa; --panel:#fff; --ink:#12181d; --muted:#5d6b76; --line:#dfe5ea;
+  --accent:#0b6ef4; --accent-ink:#fff; --ok:#1c8a5a; --warn:#c07800; --err:#c8352c;
+  --mono:ui-monospace,"Cascadia Code",Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#0f1418; --panel:#171e24; --ink:#e8eef2; --muted:#94a3ad; --line:#28323a;
+  --accent:#4d9bff; --ok:#48c98a; --warn:#e8a33a; --err:#ff6b60;
+}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+  font:15px/1.55 -apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif}
+header{border-bottom:1px solid var(--line);background:var(--panel)}
+.bar{max-width:1140px;margin:0 auto;padding:1rem 1.25rem;display:flex;gap:1rem;align-items:baseline}
+.bar h1{font-size:1.05rem;margin:0;letter-spacing:-.01em}
+.bar .tag{color:var(--muted);font-size:.85rem}
+.bar .right{margin-left:auto;font-family:var(--mono);font-size:.75rem;color:var(--muted)}
+main{max-width:1140px;margin:0 auto;padding:1.5rem 1.25rem 5rem;display:grid;gap:1.25rem;
+  grid-template-columns:1fr}
+@media(min-width:940px){main{grid-template-columns:minmax(0,1fr) 380px}}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:1.15rem}
+.card h2{font-size:.72rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
+  margin:0 0 .85rem;font-weight:650}
+.drop{border:1.5px dashed var(--line);border-radius:10px;padding:2.25rem 1rem;text-align:center;
+  cursor:pointer;transition:border-color .15s,background .15s}
+.drop:hover,.drop.over{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.drop b{display:block;margin-bottom:.3rem}
+.drop span{color:var(--muted);font-size:.87rem}
+button{font:inherit;border:1px solid var(--line);background:var(--panel);color:var(--ink);
+  padding:.5rem .9rem;border-radius:7px;cursor:pointer}
+button:hover:not(:disabled){border-color:var(--accent)}
+button:disabled{opacity:.5;cursor:not-allowed}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink);font-weight:600}
+select,input[type=text],input[type=number]{font:inherit;width:100%;padding:.45rem .6rem;
+  border:1px solid var(--line);border-radius:7px;background:var(--bg);color:var(--ink)}
+label{display:block;margin-bottom:.75rem}
+label .n{display:block;font-size:.8rem;font-weight:600;margin-bottom:.2rem}
+label .h{display:block;font-size:.78rem;color:var(--muted);margin-top:.22rem}
+.row{display:flex;gap:.5rem;align-items:center}
+.row input[type=checkbox]{width:auto;margin:0}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(88px,1fr));gap:.6rem;margin-bottom:1rem}
+.stat{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:.6rem .7rem}
+.stat b{display:block;font-size:1.25rem;font-family:var(--mono);letter-spacing:-.02em}
+.stat span{font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
+.pill{display:inline-block;font-family:var(--mono);font-size:.72rem;padding:.12rem .45rem;
+  border-radius:4px;background:var(--bg);border:1px solid var(--line);margin:0 .3rem .3rem 0}
+.ops{max-height:330px;overflow-y:auto;margin:-.3rem -.3rem .9rem}
+.op{padding:.5rem .6rem;border-radius:7px;cursor:pointer;border:1px solid transparent}
+.op:hover{background:var(--bg)}
+.op.sel{background:color-mix(in srgb,var(--accent) 10%,transparent);border-color:var(--accent)}
+.op b{display:block;font-family:var(--mono);font-size:.83rem}
+.op span{font-size:.78rem;color:var(--muted)}
+.cat{font-size:.68rem;text-transform:uppercase;letter-spacing:.09em;color:var(--muted);
+  margin:.85rem 0 .3rem;font-weight:650}
+.cat:first-child{margin-top:0}
+.job{border:1px solid var(--line);border-radius:8px;padding:.65rem .8rem;margin-bottom:.55rem;font-size:.87rem}
+.job .t{display:flex;gap:.5rem;align-items:baseline}
+.job .t b{font-family:var(--mono);font-size:.82rem}
+.job .t .s{margin-left:auto;font-size:.72rem;text-transform:uppercase;letter-spacing:.06em}
+.s.running{color:var(--accent)} .s.finished{color:var(--ok)}
+.s.failed{color:var(--err)} .s.cancelled{color:var(--warn)} .s.queued{color:var(--muted)}
+.track{height:4px;background:var(--bg);border-radius:2px;margin-top:.5rem;overflow:hidden}
+.track i{display:block;height:100%;background:var(--accent);transition:width .25s}
+.msg{font-size:.78rem;color:var(--muted);margin-top:.35rem;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.finding{border-left:3px solid var(--line);padding:.45rem .7rem;margin:.4rem 0;font-size:.85rem;background:var(--bg);border-radius:0 6px 6px 0}
+.finding.error{border-left-color:var(--err)} .finding.warning{border-left-color:var(--warn)}
+.finding.note{border-left-color:var(--accent)}
+.finding b{display:block}
+.finding span{color:var(--muted);font-size:.8rem}
+.note{color:var(--muted);font-size:.85rem}
+.err{color:var(--err);font-size:.85rem}
+.hide{display:none}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg);padding:.08em .35em;border-radius:4px}
+</style>
+</head>
+<body>
+<header><div class="bar">
+  <h1>Data Factory</h1>
+  <span class="tag">Prepare a dataset for training</span>
+  <span class="right" id="ver"></span>
+</div></header>
+
+<main>
+<div>
+  <!-- upload -->
+  <div class="card" id="uploadCard">
+    <h2>1 &middot; Your dataset</h2>
+    <div class="drop" id="drop">
+      <b>Drop a .zip here, or click to choose</b>
+      <span>Pascal VOC, YOLO, COCO, LabelMe or CSV &mdash; detected automatically</span>
+    </div>
+    <p class="note" id="upNote" style="margin:.8rem 0 0"></p>
+  </div>
+
+  <!-- dataset summary -->
+  <div class="card hide" id="infoCard" style="margin-top:1.25rem">
+    <h2>Detected</h2>
+    <div class="stats" id="stats"></div>
+    <div id="classes"></div>
+    <p class="note" id="expiry"></p>
+    <div class="row" style="margin-top:.8rem">
+      <button id="btnDownloadSrc">Download source</button>
+      <button id="btnForget">Start over</button>
+    </div>
+  </div>
+
+  <!-- results -->
+  <div class="card hide" id="jobsCard" style="margin-top:1.25rem">
+    <h2>3 &middot; Runs</h2>
+    <div id="jobs"></div>
+  </div>
+</div>
+
+<!-- operations -->
+<div>
+  <div class="card">
+    <h2>2 &middot; What to do</h2>
+    <div class="ops" id="ops"></div>
+    <form id="form"></form>
+    <div class="row" style="margin-top:.9rem">
+      <button class="primary" id="btnRun" disabled>Run</button>
+      <button id="btnPreview" disabled title="Show what would happen without writing anything">Dry run</button>
+    </div>
+    <p class="err hide" id="formErr" style="margin:.7rem 0 0"></p>
+  </div>
+</div>
+</main>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (path, opts) => fetch(`/api${path}`, opts);
+let OPS = [], selected = null, dataset = null, polling = new Map();
+
+// ---------------------------------------------------------------- startup
+(async function init(){
+  const health = await (await api("/health")).json();
+  $("ver").textContent = `v${health.version} · ${health.operations} operations`;
+  OPS = (await (await api("/operations")).json()).operations;
+  renderOps();
+})();
+
+function renderOps(){
+  const groups = {};
+  for(const op of OPS) (groups[op.category] ??= []).push(op);
+  $("ops").innerHTML = Object.keys(groups).sort().map(cat =>
+    `<div class="cat">${cat}</div>` + groups[cat].map(op =>
+      `<div class="op" data-name="${op.name}">
+         <b>${op.name}</b><span>${esc(op.summary)}</span>
+       </div>`).join("")
+  ).join("");
+  $("ops").querySelectorAll(".op").forEach(el =>
+    el.onclick = () => selectOp(el.dataset.name));
+}
+
+function selectOp(name){
+  selected = OPS.find(o => o.name === name);
+  $("ops").querySelectorAll(".op").forEach(el =>
+    el.classList.toggle("sel", el.dataset.name === name));
+  renderForm();
+  updateButtons();
+}
+
+// Forms are generated from the operation's own declaration, so an operation
+// added to the Python package appears here with no front-end change.
+function renderForm(){
+  if(!selected){ $("form").innerHTML = ""; return; }
+  let html = "";
+  if(dataset && dataset.inputs.length > 1){
+    html += field("Run on", `<select name="__input">` +
+      dataset.inputs.map(i => `<option value="${i}">${i}</option>`).join("") + `</select>`,
+      "Use the uploaded dataset, or the result of an earlier step.");
+  }
+  if(selected.writes_output){
+    const suggested = selected.name.replace(/\./g, "_");
+    html += field("Name the result",
+      `<input type="text" name="__output" value="${suggested}">`,
+      "Becomes an input you can chain into the next step.");
+  }
+  for(const p of selected.params) html += control(p);
+  $("form").innerHTML = html || `<p class="note">No settings — just run it.</p>`;
+}
+
+function control(p){
+  const req = p.required ? " *" : "";
+  const val = p.default ?? "";
+  let input;
+  if(p.kind === "bool"){
+    return `<label class="row" style="gap:.55rem">
+      <input type="checkbox" name="${p.name}" ${p.default ? "checked" : ""}>
+      <span><span class="n" style="margin:0">${p.name}</span>
+      <span class="h" style="margin:0">${esc(p.help)}</span></span></label>`;
+  }
+  if(p.kind === "choice"){
+    input = `<select name="${p.name}">` + p.choices.map(c =>
+      `<option ${c === p.default ? "selected" : ""}>${c}</option>`).join("") + `</select>`;
+  } else if(p.kind === "int" || p.kind === "float"){
+    const step = p.kind === "float" ? "0.05" : "1";
+    input = `<input type="number" step="${step}" name="${p.name}" value="${val}"
+      ${p.minimum != null ? `min="${p.minimum}"` : ""} ${p.maximum != null ? `max="${p.maximum}"` : ""}>`;
+  } else {
+    input = `<input type="text" name="${p.name}" value="${esc(String(val))}"
+      placeholder="${p.kind === "strs" ? "comma,separated" : ""}">`;
+  }
+  return field(p.name + req, input, p.help);
+}
+
+const field = (name, input, help) =>
+  `<label><span class="n">${esc(name)}</span>${input}<span class="h">${esc(help || "")}</span></label>`;
+
+// ---------------------------------------------------------------- upload
+const drop = $("drop");
+const picker = Object.assign(document.createElement("input"),
+  {type:"file", accept:".zip", style:"display:none"});
+document.body.appendChild(picker);
+drop.onclick = () => picker.click();
+picker.onchange = () => picker.files[0] && upload(picker.files[0]);
+["dragenter","dragover"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.add("over"); }));
+["dragleave","drop"].forEach(e => drop.addEventListener(e, ev => {
+  ev.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", ev => {
+  const file = ev.dataTransfer.files[0];
+  if(file) upload(file);
+});
+
+async function upload(file){
+  if(!file.name.toLowerCase().endsWith(".zip"))
+    return note($("upNote"), "That needs to be a .zip of your dataset folder.", true);
+  note($("upNote"), `Uploading ${file.name} (${mb(file.size)})…`);
+  const body = new FormData(); body.append("file", file);
+  try{
+    const response = await api("/datasets", {method:"POST", body});
+    const payload = await response.json();
+    if(!response.ok) return note($("upNote"), payload.detail || "Upload failed.", true);
+    dataset = payload;
+    note($("upNote"), `${payload.uploaded.files.toLocaleString()} files unpacked.` +
+      (payload.uploaded.skipped ? ` ${payload.uploaded.skipped} unsafe entries skipped.` : ""));
+    showInfo();
+  }catch(err){ note($("upNote"), String(err), true); }
+}
+
+function showInfo(){
+  const s = dataset.stats;
+  $("infoCard").classList.remove("hide");
+  $("stats").innerHTML = s ? [
+    ["images", s.images], ["objects", s.objects], ["classes", s.classes],
+    ["backgrounds", s.backgrounds], ["polygons", s.with_polygons],
+  ].map(([k,v]) => `<div class="stat"><b>${(v??0).toLocaleString()}</b><span>${k}</span></div>`).join("")
+    : `<p class="note">No annotations detected — image-only operations still work.</p>`;
+  $("classes").innerHTML = (dataset.format ? `<span class="pill">${dataset.format}</span>` : "") +
+    (dataset.classes || []).map(c => `<span class="pill">${esc(c)}</span>`).join("");
+  const hours = Math.round((dataset.expires_in_seconds || 0) / 3600);
+  $("expiry").textContent = `Stored temporarily and deleted automatically in about ${hours} hours.`;
+  renderForm(); updateButtons();
+}
+
+function updateButtons(){
+  const ready = !!(dataset && selected);
+  $("btnRun").disabled = !ready;
+  $("btnPreview").disabled = !ready;
+}
+
+// ---------------------------------------------------------------- running
+$("btnRun").onclick = () => run(false);
+$("btnPreview").onclick = () => run(true);
+
+async function run(dryRun){
+  if(!dataset || !selected) return;
+  const form = new FormData($("form"));
+  const params = {};
+  let input = null, outputName = "";
+  for(const p of selected.params){
+    if(p.kind === "bool"){ params[p.name] = form.has(p.name); continue; }
+    const raw = (form.get(p.name) ?? "").toString().trim();
+    if(raw !== "") params[p.name] = raw;
+  }
+  if(form.has("__input")) input = form.get("__input");
+  if(form.has("__output")) outputName = form.get("__output");
+
+  $("formErr").classList.add("hide");
+  const response = await api(`/datasets/${dataset.id}/run/${selected.name}`, {
+    method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({params, input, output_name: outputName, dry_run: dryRun}),
+  });
+  const payload = await response.json();
+  if(!response.ok){
+    $("formErr").textContent = payload.detail || "That did not work.";
+    $("formErr").classList.remove("hide");
+    return;
+  }
+  $("jobsCard").classList.remove("hide");
+  track(payload);
+}
+
+function track(job){
+  let el = $(`job-${job.id}`);
+  if(!el){
+    el = document.createElement("div");
+    el.className = "job"; el.id = `job-${job.id}`;
+    $("jobs").prepend(el);
+  }
+  paint(el, job);
+  if(["queued","running"].includes(job.state)){
+    if(!polling.has(job.id)){
+      polling.set(job.id, setInterval(async () => {
+        const next = await (await api(`/jobs/${job.id}`)).json();
+        paint($(`job-${job.id}`), next);
+        if(!["queued","running"].includes(next.state)){
+          clearInterval(polling.get(job.id)); polling.delete(job.id);
+          if(next.state === "finished") refreshInputs();
+        }
+      }, 600));
+    }
+  }
+}
+
+function paint(el, job){
+  if(!el) return;
+  const p = job.progress || {};
+  const counts = job.result && job.result.counts || {};
+  const findings = (job.result && job.result.data && job.result.data.findings) || [];
+  const warnings = (job.result && job.result.warnings) || [];
+  el.innerHTML =
+    `<div class="t"><b>${job.operation}</b>
+       ${job.output ? `<span class="note">→ ${esc(job.output)}</span>` : ""}
+       <span class="s ${job.state}">${job.state}</span></div>` +
+    (["queued","running"].includes(job.state)
+      ? `<div class="track"><i style="width:${p.percent ?? 3}%"></i></div>
+         <div class="msg">${esc(p.message || "working…")} ${p.total ? `(${p.done}/${p.total})` : ""}</div>`
+      : "") +
+    (job.error ? `<div class="err" style="margin-top:.4rem">${esc(job.error)}</div>` : "") +
+    (Object.keys(counts).length
+      ? `<div class="msg" style="margin-top:.45rem">` + Object.entries(counts)
+          .map(([k,v]) => `${k} <b>${Number(v).toLocaleString()}</b>`).join(" · ") + `</div>` : "") +
+    findings.slice(0,6).map(f =>
+      `<div class="finding ${f.severity}"><b>${esc(f.issue)}</b>
+        <span>${esc(f.detail)}</span><br><span>Fix: ${esc(f.fix)}</span></div>`).join("") +
+    (warnings.length && !findings.length
+      ? `<div class="msg" style="margin-top:.4rem">${esc(warnings[0])}</div>` : "") +
+    (job.state === "finished" && job.output
+      ? `<div class="row" style="margin-top:.6rem">
+           <button onclick="download('${job.output}')">Download result</button></div>` : "") +
+    (["queued","running"].includes(job.state)
+      ? `<div class="row" style="margin-top:.6rem">
+           <button onclick="cancel('${job.id}')">Cancel</button></div>` : "");
+}
+
+async function refreshInputs(){
+  if(!dataset) return;
+  const fresh = await (await api(`/datasets/${dataset.id}`)).json();
+  dataset.inputs = fresh.inputs;
+  renderForm();
+}
+
+window.download = (output) =>
+  window.location = `/api/datasets/${dataset.id}/download?output=${encodeURIComponent(output)}`;
+window.cancel = (id) => api(`/jobs/${id}/cancel`, {method:"POST"});
+
+$("btnDownloadSrc").onclick = () => window.download("source");
+$("btnForget").onclick = async () => {
+  if(dataset) await api(`/datasets/${dataset.id}`, {method:"DELETE"});
+  dataset = null;
+  $("infoCard").classList.add("hide"); $("jobsCard").classList.add("hide");
+  $("jobs").innerHTML = ""; note($("upNote"), "");
+  renderForm(); updateButtons();
+};
+
+// ---------------------------------------------------------------- helpers
+function note(el, text, isError){
+  el.textContent = text; el.className = isError ? "err" : "note";
+}
+function esc(s){
+  return String(s ?? "").replace(/[&<>"']/g, c =>
+    ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+}
+const mb = (b) => b > 1e9 ? `${(b/1e9).toFixed(1)} GB` : `${(b/1e6).toFixed(1)} MB`;
+</script>
+</body>
+</html>

@@ -1,38 +1,82 @@
 [project]
 name = "data-factory"
-version = "0.2.0"
-description = "Computer-vision dataset preparation: cleaning, arranging, verifying and exporting, as one tool"
+version = "0.3.0"
+description = "Computer-vision dataset preparation: convert, clean, augment, analyse and export, as one tool"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Shivpratap Singh Panwar" }]
-keywords = ["computer-vision", "dataset", "annotation", "pascal-voc", "coco", "deduplication"]
+keywords = [
+    "computer-vision", "dataset", "annotation", "pascal-voc", "coco", "yolo",
+    "labelme", "augmentation", "deduplication", "machine-learning", "mlops",
+]
 classifiers = [
-    "Programming Language :: Python :: 3.12",
-    "Topic :: Scientific/Engineering :: Image Processing",
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
     "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Scientific/Engineering :: Image Processing",
+    "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 
+# Headless OpenCV by default. opencv-python links against libGL and libglib,
+# which slim containers, Cloud Run, Lambda and most CI images do not have --
+# so the ordinary build turns "pip install" into an ImportError at runtime on
+# exactly the machines a web backend runs on. Only collect.webcam's preview
+# window needs the GUI build; everything else is headless-safe.
 dependencies = [
     "imagehash>=4.3.2",
-    "numpy>=2.4.6",
-    "opencv-python>=4.13.0.92",
-    "pillow>=12.2.0",
+    "numpy>=2.0",
+    "opencv-python-headless>=4.10",
+    "pillow>=10.0",
     "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
-# The annotation GUIs and SAM-assisted segmentation need torch; the core
-# cleaning/exporting pipeline deliberately does not, so a CI box or a web
-# backend can install this package without pulling in a deep-learning stack.
+# Swap in the GUI build for collect.webcam's live preview and the standalone
+# annotation tools. Installing this replaces opencv-python-headless; do not
+# install both into one environment.
+gui = ["opencv-python>=4.10"]
+
+# The HTTP service. Kept out of the core so a CLI user does not pull a web
+# framework, and a container that only runs the CLI stays small.
+web = [
+    "fastapi>=0.110",
+    "uvicorn[standard]>=0.27",
+    "python-multipart>=0.0.9",
+]
+
+# SAM-assisted segmentation. Deliberately isolated: the core pipeline has no
+# deep-learning dependency, so CI and web backends install in seconds.
 sam = ["torch>=2.2", "sam2>=1.0"]
+
+# Everything a contributor needs.
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "pycocotools>=2.0.7",
+    "build>=1.2",
+]
+
+[project.urls]
+Homepage = "https://annotationfree4u.com"
+Documentation = "https://annotationfree4u.com/docs"
+Source = "https://github.com/"
+Issues = "https://github.com/"
 
 [project.scripts]
 datafactory = "data_factory.cli.main:main"
 dfx = "data_factory.cli.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8.0"]
+dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [build-system]
 requires = ["hatchling"]
@@ -41,9 +85,23 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["data_factory"]
 
+[tool.hatch.build.targets.sdist]
+include = [
+    "/data_factory",
+    "/tests",
+    "/recipes",
+    "/examples",
+    "/README.md",
+    "/LICENSE",
+]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+filterwarnings = [
+    # pycocotools has not caught up with the numpy 2 __array__ signature.
+    "ignore::DeprecationWarning:pycocotools.*",
+]
 
 [tool.ruff]
 line-length = 100

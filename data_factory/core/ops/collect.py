@@ -152,6 +152,19 @@ def webcam(params: dict[str, Any], ctx: Context) -> OpResult:
     last_capture = 0.0
     window = "Data Factory - capture"
 
+    if preview and not _has_gui(cv2):
+        # The default install is opencv-python-headless, which has no window
+        # support at all. Falling back beats an unhandled cv2.error, and the
+        # timer path does the same job without a screen.
+        preview = False
+        result.warnings.append(
+            "no GUI support in this OpenCV build, so the preview window was skipped. "
+            "Install the 'gui' extra for a live preview, or pass --interval to "
+            "capture on a timer."
+        )
+        if interval <= 0:
+            interval = 1.0
+
     try:
         if preview:
             cv2.namedWindow(window, cv2.WINDOW_NORMAL)
@@ -197,6 +210,22 @@ def webcam(params: dict[str, Any], ctx: Context) -> OpResult:
 
     result.data["output"] = output
     return result
+
+
+def _has_gui(cv2: Any) -> bool:
+    """Whether this OpenCV build can open a window.
+
+    The headless wheel ships the same API surface but raises at call time, so
+    the only reliable check is the build information string.
+    """
+    try:
+        info = cv2.getBuildInformation()
+    except Exception:
+        return False
+    for backend in ("GTK", "QT", "WIN32 UI", "COCOA"):
+        if f"{backend}:" in info and "YES" in info.split(f"{backend}:")[1][:40]:
+            return True
+    return False
 
 
 def _resize_to_width(cv2: Any, frame: Any, width: int) -> Any:

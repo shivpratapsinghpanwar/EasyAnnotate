@@ -77,6 +77,18 @@ def build_parser() -> argparse.ArgumentParser:
     menu = subparsers.add_parser("menu", help="interactive menu")
     menu.set_defaults(_handler=_cmd_menu)
 
+    serve = subparsers.add_parser(
+        "serve", help="run the local web interface (this is also the desktop app)"
+    )
+    serve.add_argument("--host", default="127.0.0.1",
+                       help="bind address; 127.0.0.1 keeps it on this machine only")
+    serve.add_argument("--port", type=int, default=8765, help="port to listen on")
+    serve.add_argument("--workspace", help="where uploaded datasets are stored")
+    serve.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    serve.add_argument("--api-key", help="require this key in the X-API-Key header")
+    serve.add_argument("--reload", action="store_true", help="auto-reload on code changes")
+    serve.set_defaults(_handler=_cmd_serve)
+
     for operation in registry.all_operations():
         _add_operation_parser(subparsers, operation)
 
@@ -173,6 +185,62 @@ def _cmd_menu(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     from .menu import run_menu
 
     return run_menu(out, err)
+
+
+def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    """Start the local web interface.
+
+    This doubles as the desktop application: a local server plus the system
+    browser, which is how Jupyter and Netron ship. It avoids bundling a second
+    browser engine, works identically on Windows, macOS and Linux, and the
+    same code is what runs on a server -- so there is one thing to maintain
+    rather than a desktop build and a web build that drift.
+    """
+    import os
+
+    if args.workspace:
+        os.environ["DATAFACTORY_WORKSPACE"] = str(Path(args.workspace).expanduser())
+    if args.api_key:
+        os.environ["DATAFACTORY_API_KEY"] = args.api_key
+
+    try:
+        import uvicorn
+    except ImportError:
+        err.write(
+            "the web interface needs the 'web' extra:\n"
+            "    pip install \"data-factory[web]\"\n"
+            "    uv tool install \"data-factory[web]\"\n"
+        )
+        return 2
+
+    url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
+    out.write(f"Data Factory is at {url}\n")
+    if args.host == "0.0.0.0" and not args.api_key:
+        err.write(
+            "warning: binding to 0.0.0.0 exposes this to your whole network with no "
+            "authentication. Pass --api-key, or bind to 127.0.0.1.\n"
+        )
+    out.write("Press Ctrl+C to stop.\n")
+    out.flush()
+
+    if not args.no_browser:
+        import threading
+        import webbrowser
+
+        # Opened on a delay so the server is listening by the time the tab
+        # loads; otherwise the first request races the startup and fails.
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    import uvicorn
+
+    uvicorn.run(
+        "data_factory.service.app:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        log_level="warning",
+    )
+    return 0
 
 
 def _cmd_run_operation(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:

@@ -50,17 +50,28 @@ everywhere.
 ## Install
 
 ```bash
-uv sync                 # or: pip install -e .
-datafactory --version
+pip install data-factory                 # library + CLI
+pip install "data-factory[web]"          # + the local web interface
+uv tool install "data-factory[web]"      # isolated, on PATH
+uvx --from "data-factory[web]" datafactory serve   # run once, install nothing
 ```
 
 Python 3.12+. The core needs only numpy, Pillow, OpenCV, imagehash and PyYAML —
-deliberately no PyTorch, so a CI box or web backend can install it cheaply. The
-SAM-assisted annotator is an optional extra: `pip install -e ".[sam]"`.
+deliberately no PyTorch, so a CI box or web backend installs it in seconds.
+
+**OpenCV is the headless build by default.** The ordinary `opencv-python` wheel
+links against `libGL.so.1`, which slim containers, Cloud Run and most CI images
+do not have — it installs fine and then throws `ImportError` on exactly the
+machines a backend runs on. Only `collect.webcam`'s preview needs a GUI, and it
+falls back to timer capture with a warning. For the preview:
+`pip install "data-factory[gui]"`.
+
+Optional extras: `web` (FastAPI service), `gui` (preview window), `sam`
+(SAM-assisted segmentation), `dev` (tests and linting).
 
 ---
 
-## Three ways to drive it
+## Four ways to drive it
 
 **1. Interactive menu** — run it bare. Every path is a prompt, and destructive
 operations preview before they ask.
@@ -84,8 +95,18 @@ datafactory augment.dataset --folder ./train --output ./aug --multiplier 3 --dry
 **3. Recipes** — a dataset build written down, so it is reproducible.
 
 ```bash
-datafactory run recipes/voc_to_yolo.yaml --set root=D:/data --set out=D:/build
+datafactory run recipes/train_ready_yolo.yaml --set root=D:/data --set out=D:/build
 ```
+
+**4. Browser** — a local web interface, which doubles as the desktop app.
+
+```bash
+datafactory serve                 # opens http://localhost:8765
+```
+
+Drop in a zip, it detects the format, and every operation appears as a form
+generated from the same declaration the CLI reads. Binds to `127.0.0.1` only.
+The same code hosts the service — see [DEPLOYING.md](DEPLOYING.md).
 
 ---
 
@@ -387,7 +408,7 @@ not batch operations.
 ## Tests
 
 ```bash
-uv run pytest          # 284 tests
+uv run pytest          # 326 tests
 ```
 
 Fixtures build a small dataset carrying every defect the real one had: case
