@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .. import imaging
+from .. import imaging, parallel
 from ..annotations import formats
 from ..annotations.model import AnnotationError
 from ..registry import Param, operation
@@ -40,6 +40,7 @@ RESIZE_PARAMS = (
     Param("quality", "int", "JPEG/WebP quality.", default=95, minimum=1, maximum=100),
     Param("recursive", "bool", "Include sub-folders.", default=True),
     Param("skip_larger", "bool", "Leave images already smaller than the target alone.", default=False),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -87,6 +88,7 @@ ORIENT_PARAMS = (
     Param("format", "choice", "Output format.", default="same", choices=OUTPUT_FORMATS),
     Param("quality", "int", "JPEG/WebP quality.", default=95, minimum=1, maximum=100),
     Param("recursive", "bool", "Include sub-folders.", default=True),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -198,6 +200,7 @@ TILE_PARAMS = (
     Param("format", "choice", "Output format.", default="same", choices=OUTPUT_FORMATS),
     Param("quality", "int", "JPEG/WebP quality.", default=95, minimum=1, maximum=100),
     Param("recursive", "bool", "Include sub-folders.", default=True),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -321,7 +324,13 @@ def _load(params: dict[str, Any], ctx: Context, result: OpResult):
 
 
 def _apply_geometry(params, ctx, result, build, *, label: str) -> OpResult:
-    """Run a per-image geometric transform over a whole dataset."""
+    """Run a per-image geometric transform over a whole dataset.
+
+    Decoding, transforming and re-encoding all happen on worker threads; only
+    the disk write and the writer's bookkeeping stay on the calling thread,
+    which keeps the output order -- and therefore COCO image ids and YOLO class
+    indices -- independent of which thread finished first.
+    """
     dataset, target_format = _load(params, ctx, result)
     if dataset is None:
         return result
@@ -329,26 +338,41 @@ def _apply_geometry(params, ctx, result, build, *, label: str) -> OpResult:
     writer = DatasetWriter(
         params["output"], target_format, ctx, classes=dataset.labels, quality=params["quality"]
     )
+    quality = params["quality"]
     total = len(dataset.items)
     changed = 0
     dropped = 0
 
-    for position, item in enumerate(dataset.items, start=1):
-        ctx.check_cancelled()
-        ctx.emit(position, total, f"{item.stem} -> {label}")
+    def transform_one(item):
+        """Pure: no shared state, so it is safe on a worker thread."""
         if item.image is None:
-            continue
-        try:
-            array = imaging.load(item.image)
-        except OSError as exc:
-            result.warnings.append(f"{item.image.name}: {exc}")
-            continue
-
+            return None
+        array = imaging.load(item.image)
         height, width = array.shape[:2]
         transform = build(width, height)
         if transform is None:
+            return ("passthrough", item.annotation, None)
+        moved = imaging.transform_annotation(item.annotation, transform)
+        encoded = imaging.encode(transform.image(array), item.image.suffix, quality=quality)
+        return ("changed", moved, encoded)
+
+    def note_failure(item, exc: Exception) -> None:
+        result.warnings.append(f"{item.image.name if item.image else item.stem}: {exc}")
+
+    for item, outcome in parallel.map_bounded(
+        dataset.items,
+        transform_one,
+        ctx=ctx,
+        workers=params["workers"],
+        label=lambda item: f"{item.stem} -> {label}",
+        on_error=note_failure,
+    ):
+        if outcome is None:
+            continue
+        kind, annotation, encoded = outcome
+        if kind == "passthrough":
             writer.add(
-                item.annotation,
+                annotation,
                 stem=item.stem,
                 source=item.image,
                 split=item.split,
@@ -356,12 +380,11 @@ def _apply_geometry(params, ctx, result, build, *, label: str) -> OpResult:
             )
             continue
 
-        moved = imaging.transform_annotation(item.annotation, transform)
-        dropped += max(0, len(item.annotation.shapes) - len(moved.shapes))
+        dropped += max(0, len(item.annotation.shapes) - len(annotation.shapes))
         writer.add(
-            moved,
+            annotation,
             stem=item.stem,
-            image=transform.image(array),
+            encoded=encoded,
             source=item.image,
             split=item.split,
             suffix=item.image.suffix,

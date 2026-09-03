@@ -8,6 +8,7 @@ or a missing default fails here rather than in a user's terminal.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -205,6 +206,32 @@ class TestAugment:
             right = b / left.name
             assert right.exists(), left.name
             assert left.read_bytes() == right.read_bytes(), left.name
+
+    def test_seeding_is_stable_across_processes(self):
+        """The in-process test above cannot catch a per-process hash seed.
+
+        Python randomises str.__hash__ per interpreter, so a seed derived from
+        hash() reproduces perfectly within one run and silently differs between
+        runs -- which is the case that actually matters.
+        """
+        import subprocess
+        import sys
+
+        code = (
+            "from data_factory.core.ops.augment import _seed_for;"
+            "print(_seed_for(7, 'open0', 1))"
+        )
+        first = subprocess.run(
+            [sys.executable, "-c", code], capture_output=True, text=True, check=True
+        ).stdout.strip()
+        second = subprocess.run(
+            [sys.executable, "-c", code],
+            capture_output=True,
+            text=True,
+            check=True,
+            env={**os.environ, "PYTHONHASHSEED": "12345"},
+        ).stdout.strip()
+        assert first == second and first
 
     def test_a_different_seed_gives_different_output(self, clean_dataset: Path, tmp_path: Path):
         params = {"folder": str(clean_dataset), "multiplier": 2, "flip_horizontal": True,

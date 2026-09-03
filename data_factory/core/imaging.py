@@ -56,10 +56,14 @@ def load(path: Path) -> np.ndarray:
     return image
 
 
-def save(image: np.ndarray, path: Path, *, quality: int = 95) -> Path:
-    """Encode and write, again via a buffer so Unicode paths survive."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    suffix = path.suffix.lower() or ".jpg"
+def encode(image: np.ndarray, suffix: str, *, quality: int = 95) -> bytes:
+    """Compress to bytes without touching the disk.
+
+    Split out from :func:`save` so the expensive half can run on a worker
+    thread while the write stays on the calling thread -- encoding a JPEG is
+    most of the cost of saving one.
+    """
+    suffix = (suffix or ".jpg").lower()
     params: list[int] = []
     if suffix in (".jpg", ".jpeg"):
         params = [cv2.IMWRITE_JPEG_QUALITY, int(quality)]
@@ -70,8 +74,19 @@ def save(image: np.ndarray, path: Path, *, quality: int = 95) -> Path:
         params = [cv2.IMWRITE_PNG_COMPRESSION, max(0, min(9, 9 - int(quality) // 12))]
     ok, buffer = cv2.imencode(suffix, image, params)
     if not ok:
-        raise OSError(f"could not encode {path.name}")
-    buffer.tofile(str(path))
+        raise OSError(f"could not encode a {suffix} image")
+    return buffer.tobytes()
+
+
+def save(image: np.ndarray, path: Path, *, quality: int = 95) -> Path:
+    """Encode and write, via a buffer so Unicode paths survive on Windows."""
+    return write_bytes(encode(image, path.suffix, quality=quality), path)
+
+
+def write_bytes(data: bytes, path: Path) -> Path:
+    """Write already-encoded image bytes."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(data)
     return path
 
 

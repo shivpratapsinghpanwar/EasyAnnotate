@@ -22,12 +22,13 @@ is an accident.
 
 from __future__ import annotations
 
+import hashlib
 from collections import Counter
 from typing import Any
 
 import numpy as np
 
-from .. import imaging
+from .. import imaging, parallel
 from ..annotations.model import Annotation
 from ..registry import Param, operation
 from ..types import Context, OpResult
@@ -136,6 +137,7 @@ AUGMENT_PARAMS = (
         "Only augment these splits (blank means all). Usually: train",
         default=None,
     ),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -187,13 +189,46 @@ def augment_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
     dropped = 0
     total = len(dataset.items)
 
-    for position, item in enumerate(dataset.items, start=1):
-        ctx.check_cancelled()
-        ctx.emit(position, total, item.stem)
+    quality = params["quality"]
+    seed = params["seed"]
+
+    def build_variants(item):
+        """Decode once, generate every variant, hand back encoded bytes.
+
+        Pure and thread-safe: each variant makes its own generator from a
+        stable seed, so nothing here depends on execution order.
+        """
         if item.image is None:
-            continue
+            return None
         if wanted and item.split and item.split not in wanted:
-            # Not in scope: pass it through untouched so the output is still a
+            return ("passthrough", [])
+        array = imaging.load(item.image)
+        produced = []
+        for variant in range(multiplier):
+            rng = np.random.default_rng(_seed_for(seed, item.stem, variant))
+            pixels, annotation, used = plan.apply(array, item.annotation, rng)
+            produced.append(
+                (annotation, imaging.encode(pixels, item.image.suffix, quality=quality), used)
+            )
+        return ("augment", produced)
+
+    def note_failure(item, exc: Exception) -> None:
+        result.warnings.append(f"{item.image.name if item.image else item.stem}: {exc}")
+
+    for item, outcome in parallel.map_bounded(
+        dataset.items,
+        build_variants,
+        ctx=ctx,
+        workers=params["workers"],
+        label=lambda item: item.stem,
+        on_error=note_failure,
+    ):
+        if outcome is None:
+            continue
+        kind, produced = outcome
+
+        if kind == "passthrough":
+            # Out of scope: pass it through untouched so the output is still a
             # complete dataset rather than a train-only fragment.
             writer.add(
                 item.annotation,
@@ -203,12 +238,6 @@ def augment_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
                 suffix=item.image.suffix,
             )
             copied += 1
-            continue
-
-        try:
-            array = imaging.load(item.image)
-        except OSError as exc:
-            result.warnings.append(f"{item.image.name}: {exc}")
             continue
 
         if params["include_original"]:
@@ -221,19 +250,13 @@ def augment_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
             )
             copied += 1
 
-        for variant in range(multiplier):
-            # Seed per (image, variant) rather than per run, so adding an image
-            # does not reshuffle every other image's augmentations.
-            rng = np.random.default_rng(
-                abs(hash((params["seed"], item.stem, variant))) % (2**32)
-            )
-            pixels, annotation, used = plan.apply(array, item.annotation, rng)
+        for variant, (annotation, encoded, used) in enumerate(produced, start=1):
             dropped += max(0, len(item.annotation.shapes) - len(annotation.shapes))
             applied.update(used)
             writer.add(
                 annotation,
-                stem=f"{item.stem}_aug{variant + 1}",
-                image=pixels,
+                stem=f"{item.stem}_aug{variant}",
+                encoded=encoded,
                 source=item.image,
                 split=item.split,
                 suffix=item.image.suffix,
@@ -268,6 +291,21 @@ def augment_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
             f"lower --min-visibility to keep partial objects"
         )
     return result
+
+
+def _seed_for(seed: int, stem: str, variant: int) -> int:
+    """A stable per-(image, variant) seed.
+
+    Deliberately not ``hash((seed, stem, variant))``: Python randomises string
+    hashing per process, so that would reproduce within one run and silently
+    differ between runs -- the exact opposite of the guarantee this operation
+    makes. blake2b is stable across processes, machines and versions.
+
+    Seeding per image rather than per run also means adding one image to a
+    dataset does not reshuffle every other image's augmentations.
+    """
+    key = f"{seed}\x00{stem}\x00{variant}".encode()
+    return int.from_bytes(hashlib.blake2b(key, digest_size=8).digest(), "big") % (2**32)
 
 
 class _Plan:

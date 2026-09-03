@@ -68,24 +68,30 @@ class DatasetWriter:
         *,
         stem: str,
         image: np.ndarray | None = None,
+        encoded: bytes | None = None,
         source: Path | None = None,
         split: str = "",
         suffix: str = ".jpg",
     ) -> None:
         """Write one image and its label.
 
-        Pass ``image`` for a freshly computed frame, or ``source`` to copy an
-        untouched file straight through -- re-encoding an image nothing changed
-        would cost quality for nothing.
+        Pass ``image`` for a freshly computed frame, ``encoded`` when the
+        caller already compressed it on a worker thread, or ``source`` alone to
+        copy an untouched file straight through -- re-encoding an image nothing
+        changed would cost quality for nothing.
         """
         suffix = suffix or ".jpg"
         image_dir, label_dir = self._directories(split)
         name = f"{stem}{suffix}"
 
-        if image is not None:
+        if encoded is not None or image is not None:
             if not self.ctx.dry_run:
                 fs.ensure_dir(image_dir, self.ctx)
-                imaging.save(image, image_dir / name, quality=self.quality)
+                if encoded is not None:
+                    imaging.write_bytes(encoded, image_dir / name)
+                else:
+                    assert image is not None
+                    imaging.save(image, image_dir / name, quality=self.quality)
             self.actions.append(
                 FileAction(Action.WRITE, source or (image_dir / name), image_dir / name, "generated")
             )

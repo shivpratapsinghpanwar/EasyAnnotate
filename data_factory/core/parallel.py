@@ -24,7 +24,8 @@ thread as results arrive, so a web request can still abort a long run.
 from __future__ import annotations
 
 import os
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections import deque
+from collections.abc import Callable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any, TypeVar
 
@@ -101,6 +102,69 @@ def map_ordered(
                 if on_error is not None:
                     on_error(item, exc)
                 yield item, None
+
+
+def map_bounded(
+    items: Sequence[T],
+    work: Callable[[T], R],
+    *,
+    ctx: Context,
+    workers: int = 0,
+    label: Callable[[T], str] | None = None,
+    on_error: Callable[[T, Exception], None] | None = None,
+    in_flight: int = 0,
+) -> Iterator[tuple[T, R | None]]:
+    """:func:`map_ordered`, but with a bounded number of tasks in flight.
+
+    The difference matters when the work returns something *large*.
+    ``map_ordered`` submits every task up front, which is right for hashing --
+    a hash is 8 bytes -- and catastrophic for anything returning decoded or
+    encoded image data: 3,686 frames would all be resident at once.
+
+    Here at most ``in_flight`` results exist simultaneously, so memory stays
+    flat regardless of dataset size. Order is preserved exactly as before.
+    """
+    total = len(items)
+    if total == 0:
+        return
+
+    count = resolve_workers(workers)
+    if count == 1 or total == 1:
+        yield from map_ordered(
+            items, work, ctx=ctx, workers=1, label=label, on_error=on_error
+        )
+        return
+
+    limit = in_flight if in_flight > 0 else max(2, count * 2)
+    pending: deque[tuple[T, Any]] = deque()
+    position = 0
+
+    def take() -> tuple[T, R | None]:
+        nonlocal position
+        item, future = pending.popleft()
+        position += 1
+        ctx.emit(position, total, label(item) if label else "")
+        try:
+            return item, future.result()
+        except Exception as exc:
+            if on_error is not None:
+                on_error(item, exc)
+            return item, None
+
+    with ThreadPoolExecutor(max_workers=count) as pool:
+        try:
+            for item in items:
+                ctx.check_cancelled()
+                pending.append((item, pool.submit(work, item)))
+                if len(pending) >= limit:
+                    yield take()
+            while pending:
+                ctx.check_cancelled()
+                yield take()
+        except BaseException:
+            for _, future in pending:
+                future.cancel()
+            raise
 
 
 def collect(
