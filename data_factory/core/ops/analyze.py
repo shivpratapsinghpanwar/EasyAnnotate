@@ -11,7 +11,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .. import fs, stats
+from .. import fs, parallel, provenance, stats
 from ..annotations import formats
 from ..annotations.model import AnnotationError
 from ..bktree import BKTree
@@ -120,6 +120,7 @@ LEAKAGE_PARAMS = (
     ),
     Param("hash_size", "int", "Perceptual hash size.", default=8, minimum=4, maximum=32),
     Param("max_examples", "int", "How many leaked pairs to list.", default=50, minimum=1),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -171,22 +172,27 @@ def leakage(params: dict[str, Any], ctx: Context) -> OpResult:
 
     total = sum(len(paths) for paths in groups.values())
     hashes: dict[str, list[tuple[Any, Path]]] = {}
-    position = 0
     unreadable = 0
 
+    def note_failure(path: Path, exc: Exception) -> None:
+        nonlocal unreadable
+        unreadable += 1
+        if unreadable <= 5:
+            result.warnings.append(f"{path.name}: unreadable ({exc})")
+
     for split, paths in groups.items():
-        entries: list[tuple[Any, Path]] = []
-        for path in paths:
-            position += 1
-            ctx.check_cancelled()
-            ctx.emit(position, total, f"{split}/{path.name}")
-            try:
-                entries.append((fingerprint(path), path))
-            except Exception as exc:
-                unreadable += 1
-                if unreadable <= 5:
-                    result.warnings.append(f"{path.name}: unreadable ({exc})")
-        hashes[split] = entries
+        hashes[split] = [
+            (digest, path)
+            for path, digest in parallel.map_ordered(
+                paths,
+                fingerprint,
+                ctx=ctx,
+                workers=params["workers"],
+                label=lambda path, split=split: f"{split}/{path.name}",
+                on_error=note_failure,
+            )
+            if digest is not None
+        ]
 
     names = sorted(groups)
     matches: list[dict[str, Any]] = []
@@ -245,6 +251,55 @@ def leakage(params: dict[str, Any], ctx: Context) -> OpResult:
             "Fix by de-duplicating before splitting: clean.dedup --method "
             f"{method if method != 'exact' else 'phash'}, then dataset.split."
         )
+    return result
+
+
+HISTORY_PARAMS = (
+    Param("folder", "dir", "Dataset folder to read the history of.", required=True, must_exist=True),
+    Param("limit", "int", "How many entries to return, most recent last.", default=50, minimum=1),
+)
+
+
+@operation(
+    "inspect.history",
+    title="Dataset lineage",
+    category="inspect",
+    summary="Show what was done to this dataset, in order, with the settings each step used.",
+    params=HISTORY_PARAMS,
+    notes=(
+        "Every operation that writes a dataset appends to\n"
+        "<output>/.datafactory/history.jsonl, so a built folder carries its own\n"
+        "provenance. This reads it back.\n"
+        "\n"
+        "It answers the questions that are otherwise unanswerable six weeks\n"
+        "later: was this augmented, at what seed, was it resized before or\n"
+        "after the split, which folders went into the merge.\n"
+        "\n"
+        "The file is plain JSON Lines -- readable without this tool, and\n"
+        "appended to rather than rewritten, so a build that dies halfway still\n"
+        "leaves a truthful record of what it did manage."
+    ),
+)
+def history(params: dict[str, Any], ctx: Context) -> OpResult:
+    result = OpResult(op="inspect.history", dry_run=ctx.dry_run)
+    folder: Path = params["folder"]
+
+    entries = provenance.read(folder)
+    if not entries:
+        result.warnings.append(
+            f"no history recorded under {folder}. Either it was not built by Data "
+            f"Factory, or it was built before lineage was recorded."
+        )
+
+    limited = entries[-params["limit"] :]
+    result.counts.update({"steps": len(entries), "shown": len(limited)})
+    result.data.update(
+        {
+            "history_file": provenance.history_path(folder),
+            "steps": limited,
+            "operations": [e.get("op", "?") for e in limited],
+        }
+    )
     return result
 
 

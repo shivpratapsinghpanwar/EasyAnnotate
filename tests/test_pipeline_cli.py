@@ -81,6 +81,23 @@ class TestRecipeLoading:
         with pytest.raises(RecipeError, match="non-empty"):
             Recipe.load(path)
 
+    def test_a_string_path_is_accepted(self, tmp_path: Path, clean_dataset: Path):
+        """Recipe.load("build.yaml") is what a library caller writes."""
+        path = write_recipe(
+            tmp_path / "r.yaml",
+            {"steps": [{"op": "labels.list", "with": {"folder": str(clean_dataset)}}]},
+        )
+        assert len(Recipe.load(str(path)).steps) == 1
+
+    def test_the_shipped_recipes_are_valid(self):
+        """They are documentation people copy, so they must actually bind."""
+        root = Path(__file__).resolve().parent.parent / "recipes"
+        found = sorted(root.glob("*.yaml"))
+        assert found, "no recipes shipped"
+        for recipe in found:
+            loaded = Recipe.load(recipe, overrides={"root": ".", "out": "./build"})
+            assert loaded.steps, recipe.name
+
     def test_json_recipes_work_without_yaml(self, tmp_path: Path, clean_dataset: Path):
         path = tmp_path / "r.json"
         path.write_text(

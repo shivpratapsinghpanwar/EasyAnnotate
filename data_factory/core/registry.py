@@ -226,7 +226,12 @@ class Operation:
         return bound
 
     def run(self, supplied: dict[str, Any], ctx: Context | None = None) -> OpResult:
-        return self.func(self.bind(supplied), ctx or Context())
+        bound = self.bind(supplied)
+        result = self.func(bound, ctx or Context())
+        # Lineage is recorded here rather than inside each operation, so no
+        # operation can forget it and a new one gets it without asking.
+        _record_provenance(self.name, bound, result)
+        return result
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -238,6 +243,29 @@ class Operation:
             "destructive": self.destructive,
             "params": [p.as_dict() for p in self.params],
         }
+
+
+def _record_provenance(name: str, params: dict[str, Any], result: OpResult) -> None:
+    """Append to the output folder's history, never failing the run for it.
+
+    Imported lazily to keep the module graph acyclic -- provenance depends on
+    nothing but types, and registry stays the thing everything else imports.
+    """
+    try:
+        from . import provenance
+
+        provenance.record(name, params, result, version=_version())
+    except Exception:  # provenance must never break a completed operation
+        pass
+
+
+def _version() -> str:
+    try:
+        from .. import __version__
+
+        return str(__version__)
+    except Exception:
+        return ""
 
 
 _REGISTRY: dict[str, Operation] = {}

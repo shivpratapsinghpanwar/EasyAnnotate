@@ -17,6 +17,7 @@ from typing import Any
 from .. import fs
 from ..bktree import BKTree
 from ..pairs import PairIndex, sidecar_for
+from .. import parallel
 from ..registry import Param, operation
 from ..types import Action, Context, OpResult
 
@@ -40,6 +41,7 @@ PARAMS = (
           default="annotated", choices=("annotated", "first", "largest")),
     Param("recursive", "bool", "Include sub-folders.", default=False),
     Param("move_labels", "bool", "Move or delete the matching sidecar label too.", default=True),
+    Param("workers", "int", parallel.WORKERS_HELP, default=0, minimum=0, maximum=32),
 )
 
 
@@ -104,14 +106,24 @@ def dedup(params: dict[str, Any], ctx: Context) -> OpResult:
     if method != "exact":
         tree = BKTree(lambda a, b: a - b)
 
-    for position, (folder, image) in enumerate(entries, start=1):
-        ctx.check_cancelled()
-        ctx.emit(position, total, f"hashing {image.name}")
-        try:
-            digest = hasher(image)
-        except Exception as exc:  # unreadable or truncated image
-            result.warnings.append(f"skipped {image.name}: {exc}")
-            result.bump("unreadable")
+    # Hashing is pure and decode-bound, so it runs across threads; grouping is
+    # order-dependent (the first image seen is the one kept) and stays serial.
+    # map_ordered yields in input order, so the two phases agree.
+    def note_failure(entry: tuple[Path, Path], exc: Exception) -> None:
+        result.warnings.append(f"skipped {entry[1].name}: {exc}")
+        result.bump("unreadable")
+
+    hashed = parallel.map_ordered(
+        entries,
+        lambda entry: hasher(entry[1]),
+        ctx=ctx,
+        workers=params["workers"],
+        label=lambda entry: f"hashing {entry[1].name}",
+        on_error=note_failure,
+    )
+
+    for (folder, image), digest in hashed:
+        if digest is None:
             continue
 
         if method == "exact":

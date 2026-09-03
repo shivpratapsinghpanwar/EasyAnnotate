@@ -1,0 +1,126 @@
+# From a folder someone handed you, to a YOLO dataset you can train on.
+#
+#   datafactory run recipes/train_ready_yolo.yaml --set root=D:/my/data --set out=D:/my/build --dry-run
+#   datafactory run recipes/train_ready_yolo.yaml --set root=D:/my/data --set out=D:/my/build
+#
+# Preview first. Everything from step 2 writes to disk, and step 2 writes into
+# ${root} itself -- the rest write only under ${out}.
+#
+# The order is deliberate and most of it matters:
+#
+#   orientation before anything else, or every later step inherits sideways
+#     images with correctly-placed-but-wrong boxes
+#   class case before the split, so a class is not split in half before it is
+#     even divided into sets
+#   dedup before the split, because de-duplicating afterwards leaves the
+#     near-duplicate already sitting in both train and val
+#   resize before augment, so augmentation works on the size you will train at
+#   augment last, and train only
+
+name: train-ready-yolo
+description: Audit, straighten, clean, split, convert to YOLO, resize and augment.
+
+vars:
+  root: ./dataset          # folder of images + labels, in any supported format
+  out: ./build             # everything this recipe produces
+  size: 640                # training input size
+  seed: 42
+
+steps:
+  # What is this, and what is wrong with it? Neither step changes anything.
+  - name: identify the format
+    op: convert.detect
+    with:
+      folder: "${root}"
+
+  - name: health check
+    op: inspect.health
+    with:
+      folder: "${root}"
+
+  # EXIF first. A phone photo stored sideways with a "rotate me" tag is drawn
+  # upright in the annotation GUI and read sideways by the trainer, so the
+  # boxes land in the wrong place with nothing reporting an error.
+  - name: straighten orientation
+    op: image.autoorient
+    with:
+      folder: "${root}"
+      output: "${out}/upright"
+
+  # Case drift splits one class into two. Fix it before anything counts classes.
+  - name: unify class name case
+    op: labels.rename
+    with:
+      folder: "${out}/upright"
+      fold_case: true
+
+  # Before the split, not after: a near-duplicate removed afterwards has
+  # already been dealt into both train and val.
+  - name: remove near-duplicates
+    op: clean.dedup
+    with:
+      folders: "${out}/upright"
+      method: phash
+      threshold: 8
+      action: move
+      keep: annotated
+
+  - name: split
+    op: dataset.split
+    with:
+      folder: "${out}/upright"
+      output: "${out}/split"
+      ratios: "0.8,0.1,0.1"
+      names: "train,val,test"
+      seed: "${seed}"
+
+  # The check that justifies the ordering above. Should report zero.
+  - name: check for leakage
+    op: inspect.leakage
+    with:
+      folder: "${out}/split"
+      method: phash
+      threshold: 6
+
+  - name: convert to yolo
+    op: convert.dataset
+    with:
+      folder: "${out}/split"
+      output: "${out}/yolo"
+      to: yolo
+
+  # letterbox, not stretch: nothing distorted, nothing cropped away.
+  - name: resize
+    op: image.resize
+    with:
+      folder: "${out}/yolo"
+      output: "${out}/yolo-${size}"
+      width: "${size}"
+      height: "${size}"
+      mode: letterbox
+
+  # Train only. Augmenting validation makes the score measure the augmentation
+  # rather than the model, and it usually flatters it.
+  #
+  # No vertical flip: upside-down doors are not a thing this model will see.
+  - name: augment the training split
+    op: augment.dataset
+    with:
+      folder: "${out}/yolo-${size}"
+      output: "${out}/final"
+      splits: "train"
+      multiplier: 3
+      flip_horizontal: true
+      flip_vertical: false
+      rotate: 8.0
+      brightness: 0.25
+      contrast: 0.2
+      seed: "${seed}"
+
+  # The handover artefact: one HTML file showing what you are about to train on.
+  - name: report
+    op: report.html
+    with:
+      folder: "${out}/final"
+      output: "${out}/dataset-report.html"
+      title: "Training set"

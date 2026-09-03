@@ -1,8 +1,8 @@
 # Data Factory
 
-Dataset preparation for computer vision — cleaning, arranging, verifying and
-exporting — as **one tool** with a library, a CLI, an interactive menu, and a
-YAML pipeline runner over a single shared core.
+Dataset preparation for computer vision — convert, clean, preprocess, augment,
+analyse and export — as **one tool** with a library, a CLI, an interactive menu,
+and a YAML pipeline runner over a single shared core.
 
 *Author: Shivpratap Singh Panwar (Kody Technolab Public Limited). Originally
 created 22 July 2026 as a folder of task-specific scripts; consolidated into
@@ -17,9 +17,9 @@ paths at the top, each re-implemented "find the image that matches this XML",
 and they had quietly drifted apart — one moved sidecar labels alongside
 duplicates, another had that code commented out. Same job, different answers.
 
-Everything here runs through one core. Pairing an image with its label, previewing
-before writing, and reporting what happened are solved once, so no operation can
-forget them.
+Everything here runs through one core. Pairing an image with its label, moving
+annotations when the pixels move, previewing before writing, and recording what
+happened are solved once, so no operation can forget them.
 
 ```
 data_factory/
@@ -28,16 +28,21 @@ data_factory/
     registry.py      every operation declares its own parameters
     pairs.py         the image + sidecar abstraction all 15 scripts re-invented
     fs.py            the single choke point every file mutation passes through
-    bktree.py        metric tree behind fast perceptual dedup
-    annotations/     neutral model + Pascal VOC reader/writer + COCO builder
+    imaging.py       image I/O, and geometry that moves annotations with pixels
+    writer.py        streaming dataset writer, so augmentation is not memory-bound
+    stats.py         dataset measurement, and the judgements drawn from it
+    parallel.py      ordered parallel map for the decode-bound stages
+    provenance.py    per-dataset lineage, recorded automatically
+    bktree.py        metric tree behind fast perceptual matching
+    annotations/     neutral model + VOC / YOLO / COCO / LabelMe / CSV
     ops/             the operations themselves
   cli/             argparse commands, interactive menu, terminal rendering
   pipeline.py      YAML/JSON recipes
 ```
 
 An operation declares its parameters **once**. The CLI subcommand, the menu
-prompts, the recipe validator and the web form schema are all generated from that
-declaration — adding an operation means writing one file, and it appears
+prompts, the recipe validator and the web form schema are all generated from
+that declaration — adding an operation means writing one file, and it appears
 everywhere.
 
 ---
@@ -68,59 +73,132 @@ datafactory
 
 ```bash
 datafactory list                          # every operation
-datafactory explain clean.dedup           # full help for one
+datafactory explain augment.dataset       # full help for one
 
-datafactory inspect.dataset --folder ./data
-datafactory clean.dedup --folders ./a ./b --method phash --threshold 8 --dry-run
-datafactory export.coco --folder ./voc --output ./coco
+datafactory convert.detect --folder ./mystery-dataset
+datafactory inspect.health --folder ./data
+datafactory convert.dataset --folder ./voc --output ./yolo --to yolo
+datafactory augment.dataset --folder ./train --output ./aug --multiplier 3 --dry-run
 ```
 
 **3. Recipes** — a dataset build written down, so it is reproducible.
 
 ```bash
-datafactory run recipes/voc_to_coco.yaml --set root=D:/data --set out=D:/build --dry-run
+datafactory run recipes/voc_to_yolo.yaml --set root=D:/data --set out=D:/build
 ```
 
 ---
 
 ## Operations
 
+**Formats** — every direction, because they meet in the middle at one model.
+
 | Operation | What it does |
 |---|---|
-| `inspect.dataset` | Full audit: pairing, classes, geometry, corrupt files, duplicates |
+| `convert.dataset` | VOC ↔ YOLO ↔ COCO ↔ LabelMe ↔ CSV, boxes and polygons |
+| `convert.detect` | Identify an unknown folder and summarise what is in it |
+| `export.coco` | Pascal VOC → COCO with segmentation and hard negatives |
+
+**Preprocessing** — the pixels move, and the annotations move with them.
+
+| Operation | What it does |
+|---|---|
+| `image.resize` | Fixed size by letterbox, stretch, crop or fit |
+| `image.autoorient` | Bake EXIF rotation into the pixels, so every reader agrees |
+| `image.tile` | Slice big images into an overlapping grid, reassigning objects |
+| `augment.dataset` | Seeded variants: flips, rotation, colour, blur, noise, cutout |
+
+**Analysis** — whether this dataset will train into something that works.
+
+| Operation | What it does |
+|---|---|
+| `inspect.health` | Class balance, object size, geometry — ranked findings with fixes |
+| `inspect.leakage` | Near-duplicate images shared between train and val |
+| `inspect.dataset` | Pairing, classes, geometry, corrupt files, duplicates |
+| `inspect.history` | What was done to this dataset, in order, with its settings |
 | `inspect.coco` | Summarise an `instances.json`, flag case-collided categories |
+| `report.html` | One self-contained HTML report, no external assets |
 | `labels.list` | Count classes and objects, surface case-variant class names |
-| `labels.rename` | Bulk rename/drop classes; `--fold-case` unifies case drift |
+| `verify.visualize` | Draw boxes and polygons onto copies, colour-coded by class |
+
+**Dataset algebra**
+
+| Operation | What it does |
+|---|---|
+| `dataset.merge` | Combine datasets, reconciling class drift and name collisions |
+| `dataset.filter` | Subset by class, object count, object size or split |
+| `dataset.sample` | Seeded subset — random, stratified, or capped per class |
+| `dataset.split` | Reproducible, stratified train/val/test split |
+| `dataset.sort` | Group pairs into one folder per class |
+
+**Cleaning and collection**
+
+| Operation | What it does |
+|---|---|
 | `clean.dedup` | Exact or perceptual duplicates, sidecar labels moved too |
 | `clean.orphans` | Report, quarantine or delete unpaired images and labels |
 | `clean.unannotated` | Move images with no label into an "still to annotate" queue |
 | `clean.rename` | Sequential renaming, pair-safe, retargets the label's filename |
-| `dataset.split` | Reproducible, stratified train/val/test split |
-| `dataset.sort` | Group pairs into one folder per class |
-| `verify.visualize` | Draw boxes and polygons onto copies, colour-coded by class |
-| `export.coco` | Pascal VOC → COCO, with segmentation and hard negatives |
+| `labels.rename` | Bulk rename/drop classes; `--fold-case` unifies case drift |
 | `collect.frames` | Video (or a folder of videos) → numbered JPEG frames |
 | `collect.webcam` | Capture stills from a camera, manually or on a timer |
 
-Operations marked `!` in `datafactory list` write to disk. All of them accept
-`--dry-run`.
+Operations marked `!` in `datafactory list` write to disk. All accept `--dry-run`.
 
 ---
 
-## Three ideas worth knowing
+## Five ideas worth knowing
 
-**Pairs.** An image and its `.xml` are one thing. Every operation moves, renames
-and splits them together — that is a property of the core, not something each
-operation remembers to do.
+**Pairs.** An image and its label are one thing. Every operation moves, renames
+and splits them together — a property of the core, not something each operation
+remembers to do.
 
 **Dry run is the same code path.** Operations build their full list of
 `FileAction`s either way; `--dry-run` only stops the last step from executing. A
-preview is therefore a faithful description of the real run, not an
-approximation of one.
+preview is a faithful description of the real run, not an approximation.
 
-**Results are data.** Every operation returns an `OpResult` with counts, an audit
-trail, warnings and structured payload. The terminal renderer is one consumer of
-that; a web API is another.
+**Formats meet in the middle.** Readers parse into a neutral `Annotation`;
+writers serialise out of it. Five formats cost five readers and five writers,
+not twenty converters. Adding CreateML is one file, and it converts to and from
+everything already here.
+
+**Geometry is solved once.** Resize, tile and augment share one transform layer.
+A box is rebuilt from all four transformed corners, so rotation stays correct
+rather than degenerating into a box of a box; objects that fall out of frame or
+survive only as slivers are dropped rather than becoming three pixels labelled
+"door".
+
+**Results are data.** Every operation returns an `OpResult` with counts, an
+audit trail, warnings and structured payload. The terminal renderer is one
+consumer; a web API is another.
+
+---
+
+## What it catches
+
+Run on the real Project_Door V3 set (3,686 images, 3,871 objects):
+
+```
+$ datafactory inspect.health --folder ./pascal_voc
+
+[error] Classes differing only by capitalisation
+   Open / open; Close / close
+   fix: These train as separate classes and split your data in half.
+        Fix with labels.rename --fold-case.
+
+[note] Mixed image sizes — 811 distinct resolutions.
+[note] No train/val split.
+
+  Open: 1385 objects / 1316 images
+  Close: 1341 objects / 1206 images
+  close:  645 objects /  614 images
+  open:   500 objects /  499 images
+```
+
+That is a dataset with two real classes training as four, and no one had
+noticed. `inspect.leakage` finds the other expensive one — the same photo in
+both train and val, which makes a validation score measure memorisation and
+looks excellent right up until deployment.
 
 ---
 
@@ -129,10 +207,9 @@ that; a web API is another.
 ```python
 import data_factory as df
 
-result = df.run("inspect.dataset", {"folder": "./data"})
-print(result.counts["objects"])
-for issue in result.data["issues"]:
-    print(issue["severity"], issue["issue"], "->", issue["fix"])
+result = df.run("inspect.health", {"folder": "./data"})
+for finding in result.data["findings"]:
+    print(finding["severity"], finding["issue"], "->", finding["fix"])
 
 payload = result.as_dict()          # JSON-serialisable, ready to return over HTTP
 ```
@@ -148,7 +225,7 @@ ctx = Context(
     progress=lambda done, total, msg: socket.send({"done": done, "total": total}),
     cancel_check=lambda: job.is_cancelled(),
 )
-df.run("clean.dedup", {"folders": ["./data"], "method": "phash"}, ctx)
+df.run("augment.dataset", {"folder": "./train", "output": "./aug"}, ctx)
 ```
 
 A front-end can build its own forms without importing Python at all:
@@ -160,6 +237,44 @@ datafactory schema --output schema.json
 That file describes every operation, every parameter, its kind (`dir`, `int`,
 `choice`, …), defaults, and whether it is destructive. See
 `examples/web_api.py` for a working FastAPI wrapper in about eighty lines.
+
+---
+
+## Provenance
+
+Every operation that writes a dataset appends one line to
+`<output>/.datafactory/history.jsonl`. It is recorded in `Operation.run`, not by
+the operations themselves, so no operation can forget and a new one gets it
+without asking.
+
+```bash
+datafactory inspect.history --folder ./final
+```
+
+It answers the questions that are otherwise unanswerable six weeks later: was
+this augmented, at what seed, was it resized before or after the split, which
+folders went into the merge. Plain JSON Lines — readable without this tool, and
+appended to rather than rewritten, so a build that dies halfway still leaves a
+truthful record.
+
+---
+
+## Performance
+
+Decode-bound stages run across threads, in input order, so results stay
+reproducible. Perceptual dedup over the real 2,783-image V2 set:
+
+| | Time | Result |
+|---|---|---|
+| `--workers 1` | 95.6s | 2,783 scanned, 2 duplicates |
+| `--workers 0` (auto) | 33.2s | 2,783 scanned, 2 duplicates |
+
+Identical output, 2.9× faster. Order is preserved deliberately: dedup keeps the
+first image it sees, so a result that depended on which thread finished first
+would not be reproducible.
+
+The BK-tree handles the other half — comparing every hash to every other is
+O(n²), about 112 million comparisons on a 15k-image set.
 
 ---
 
@@ -189,6 +304,10 @@ def mything(params: dict, ctx: Context) -> OpResult:
 
 Then add it to the imports in `data_factory/core/ops/__init__.py`.
 
+Adding a **format** is two functions — a reader producing `Annotation` and a
+writer consuming it — plus an entry in `annotations/formats.py`. It then
+converts to and from every other format for free.
+
 ---
 
 ## Where the old scripts went
@@ -204,7 +323,7 @@ Then add it to the imports in `data_factory/core/ops/__init__.py`.
 | `Find_label_PVOC.py` | `labels.list` |
 | `video_to_frames.py` | `collect.frames` |
 | `live_webcame_image_saver.txt` (unfinished) | `collect.webcam` |
-| `coco_dataset_generators.py` | `export.coco` |
+| `coco_dataset_generators.py` | `export.coco` / `convert.dataset --to coco` |
 | `draw_BB_from_xml_toNewFolder.py` | `verify.visualize --draw bbox` |
 | `Crosscheck_polygon_coco_data.py` | `verify.visualize --split-by-type` |
 | `Crosscheck_finishedData_pascalvoc.py` | `dataset.sort` + `verify.visualize` |
@@ -218,7 +337,8 @@ not batch operations.
 - **COCO exported four classes where there were two.** Categories were keyed on
   the raw XML string, so `Open` and `open` became separate classes — splitting
   Project_Door V3 as 1341/1385/645/500. Export now folds case by default and
-  *reports* every merge; `labels.rename --fold-case` fixes it at the source.
+  *reports* every merge; `labels.rename --fold-case` fixes it at the source, and
+  `inspect.health` now flags it as an error before you get that far.
 - **SAM polygons exported as empty masks.** The two annotation tools write
   different polygon XML (`<x1>` vs `<pt><x>`) and the converter only read one.
   The reader now accepts both.
@@ -228,7 +348,8 @@ not batch operations.
 - **Renaming left labels pointing at the old image.** The `<filename>` and
   `<path>` fields inside the XML are now retargeted.
 - **Perceptual dedup was O(n²).** ~112 million comparisons on a 15k-image set.
-  A BK-tree cuts it to roughly logarithmic per lookup.
+  A BK-tree cuts it to roughly logarithmic per lookup, and decoding now runs
+  across threads.
 - **Duplicate removal could discard the annotated copy.** `keep=annotated` now
   keeps the labelled twin by default.
 - **COCO `area` was always the box area,** even for polygons. It is now the true
@@ -241,17 +362,22 @@ not batch operations.
 ## Tests
 
 ```bash
-uv run pytest          # 114 tests
+uv run pytest          # 280 tests
 ```
 
 Fixtures build a small dataset carrying every defect the real one had: case
 variant classes, both polygon dialects, a hard negative, an exact duplicate,
 orphans of both kinds and a corrupt XML.
 
+The format tests convert and read back, asserting on what survived — a
+converter's failure mode is not a crash, it is arriving with fewer objects than
+it left with. The geometry tests assert the annotation lands where the pixels
+landed, which is the failure that silently ruins a dataset.
+
 ---
 
 ## Datasets in this repository
 
 `Projects/Project_Door/` holds the door-state dataset (V3: 3686 images, 3871
-objects, 2726 with segmentation) and `Models/Sam2.1_tiny/` the SAM 2.1 tiny
-checkpoint. Neither is tracked by git.
+objects) and `Models/Sam2.1_tiny/` the SAM 2.1 tiny checkpoint. Neither is
+tracked by git.

@@ -51,7 +51,10 @@ class Recipe:
     variables: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path, overrides: dict[str, str] | None = None) -> Recipe:
+    def load(cls, path: Path | str, overrides: dict[str, str] | None = None) -> Recipe:
+        # Accept a plain string too: the CLI always hands over a Path, but a
+        # library caller reasonably writes Recipe.load("build.yaml").
+        path = Path(path)
         document = _load_document(path)
         return cls.from_dict(document, source=path, overrides=overrides)
 

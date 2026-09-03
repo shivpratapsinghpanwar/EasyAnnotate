@@ -151,23 +151,27 @@ def _geometry_problem(shape: Any, width: int, height: int) -> str | None:
 def _duplicate_scan(
     index: PairIndex, params: dict[str, Any], result: OpResult, ctx: Context
 ) -> dict[str, Any]:
-    """Reuse the dedup machinery in report-only mode."""
-    from . import dedup as dedup_module
+    """Reuse the dedup machinery in report-only mode.
+
+    Bound through the registry rather than by hand: that fills in defaults for
+    every parameter we do not care about here, so adding one to clean.dedup
+    cannot silently break this call site.
+    """
+    from ..registry import get as get_operation
 
     method = params["check_duplicates"]
     preview = Context(dry_run=True, progress=ctx.progress, cancel_check=ctx.cancel_check)
-    found = dedup_module.dedup(
-        {
-            "folders": [index.root],
-            "method": method,
-            "threshold": int(params["threshold"]),
-            "hash_size": 8,
-            "action": "report",
-            "quarantine": None,
-            "keep": "annotated",
-            "recursive": params["recursive"],
-            "move_labels": True,
-        },
+    dedup_op = get_operation("clean.dedup")
+    found = dedup_op.func(
+        dedup_op.bind(
+            {
+                "folders": [index.root],
+                "method": method,
+                "threshold": int(params["threshold"]),
+                "action": "report",
+                "recursive": params["recursive"],
+            }
+        ),
         preview,
     )
     result.counts["duplicate_images"] = found.counts.get("duplicates", 0)
