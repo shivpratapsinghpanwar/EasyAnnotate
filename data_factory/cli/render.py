@@ -71,15 +71,12 @@ def render_result(
 
     if result.counts:
         width = max(len(k) for k in result.counts)
-        for key, value in result.counts.items():
-            stream.write(f"  {key.replace('_', ' '):<{width}}  {value:>9,}\n")
+        stream.writelines(f"  {key.replace('_', ' '):<{width}}  {value:>9,}\n" for key, value in result.counts.items())
 
     _render_data(result.data, stream, style)
 
-    for warning in result.warnings:
-        stream.write(style.yellow(f"  ! {warning}\n"))
-    for error in result.errors:
-        stream.write(style.red(f"  x {error}\n"))
+    stream.writelines(style.yellow(f"  ! {warning}\n") for warning in result.warnings)
+    stream.writelines(style.red(f"  x {error}\n") for error in result.errors)
 
     if result.actions and show_actions:
         shown = result.actions if verbose else result.actions[:show_actions]

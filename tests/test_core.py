@@ -11,7 +11,7 @@ from data_factory.core import registry
 from data_factory.core.bktree import BKTree
 from data_factory.core.pairs import PairIndex
 from data_factory.core.registry import Param, ParamError
-from data_factory.core.types import Action, Context, FileAction, OpResult
+from data_factory.core.types import Action, Context, OpResult
 
 
 class TestParamCoercion:

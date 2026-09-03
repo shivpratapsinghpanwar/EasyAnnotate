@@ -51,7 +51,7 @@ class Recipe:
     variables: dict[str, str] = field(default_factory=dict)
 
     @classmethod
-    def load(cls, path: Path, overrides: dict[str, str] | None = None) -> "Recipe":
+    def load(cls, path: Path, overrides: dict[str, str] | None = None) -> Recipe:
         document = _load_document(path)
         return cls.from_dict(document, source=path, overrides=overrides)
 
@@ -61,7 +61,7 @@ class Recipe:
         document: dict[str, Any],
         source: Path | None = None,
         overrides: dict[str, str] | None = None,
-    ) -> "Recipe":
+    ) -> Recipe:
         if not isinstance(document, dict):
             raise RecipeError("a recipe must be a mapping at the top level")
         raw_steps = document.get("steps")

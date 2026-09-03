@@ -13,15 +13,16 @@ for the small radii (0-10 bits) that dedup actually uses.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Iterator
+from collections.abc import Callable, Iterator
+from typing import Any
 
 
 class _Node:
-    __slots__ = ("item", "children")
+    __slots__ = ("children", "item")
 
     def __init__(self, item: Any) -> None:
         self.item = item
-        self.children: dict[int, "_Node"] = {}
+        self.children: dict[int, _Node] = {}
 
 
 class BKTree:

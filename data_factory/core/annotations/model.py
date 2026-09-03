@@ -76,7 +76,7 @@ class Shape:
             flat.extend((int(x), int(y)))
         return flat
 
-    def clamped(self, width: int, height: int) -> "Shape":
+    def clamped(self, width: int, height: int) -> Shape:
         """Return a copy with all coordinates inside the image bounds."""
 
         def clamp_x(value: int) -> int:

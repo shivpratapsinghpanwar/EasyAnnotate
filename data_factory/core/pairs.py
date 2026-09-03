@@ -8,9 +8,9 @@ consumes it, so "keep the pair together" stops being a thing anyone can forget.
 
 from __future__ import annotations
 
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
 
 from . import fs
 
@@ -72,7 +72,7 @@ class PairIndex:
         recursive: bool = False,
         image_exts: Iterable[str] = fs.IMAGE_EXTS,
         label_ext: str = fs.DEFAULT_LABEL_EXT,
-    ) -> "PairIndex":
+    ) -> PairIndex:
         extset = {e.lower() for e in image_exts}
         label_ext = label_ext.lower()
         found: dict[str, Pair] = {}

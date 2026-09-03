@@ -5,16 +5,38 @@ added here becomes available to the CLI, the menu, the YAML runner, and the web
 schema at once -- no front-end needs editing.
 """
 
-from . import audit, collect, dataset, dedup, export, labels, pairing, rename, visualize
+from . import (
+    analyze,
+    audit,
+    augment,
+    collect,
+    combine,
+    convert,
+    dataset,
+    dedup,
+    export,
+    image,
+    labels,
+    pairing,
+    rename,
+    report,
+    visualize,
+)
 
 __all__ = [
+    "analyze",
     "audit",
+    "augment",
     "collect",
+    "combine",
+    "convert",
     "dataset",
     "dedup",
     "export",
+    "image",
     "labels",
     "pairing",
     "rename",
+    "report",
     "visualize",
 ]

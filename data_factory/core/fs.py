@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import hashlib
 import shutil
+from collections.abc import Iterable, Iterator
 from pathlib import Path
-from typing import Iterable, Iterator
 
 from .types import Action, Context, FileAction
 

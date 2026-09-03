@@ -10,7 +10,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from .. import fs
 from ..annotations import voc
 from ..annotations.model import Annotation, AnnotationError
 from ..pairs import PairIndex

@@ -10,8 +10,9 @@ behind.
 from __future__ import annotations
 
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from .. import fs
 from ..bktree import BKTree

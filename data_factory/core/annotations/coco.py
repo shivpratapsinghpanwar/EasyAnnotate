@@ -11,11 +11,12 @@ drift is fixed *and* visible rather than silently baked into the export.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from .model import Annotation, Shape
+from .model import Annotation, Point, Shape
 
 #: How to decide whether two label spellings are the same class.
 CASE_POLICIES = ("exact", "casefold")
@@ -147,6 +148,107 @@ class CocoBuilder:
 def load(path: Path) -> dict[str, Any]:
     """Read an existing instances.json."""
     return json.loads(Path(path).read_text(encoding="utf-8"))
+
+
+def to_annotations(
+    coco: dict[str, Any], *, unsupported_out: list[str] | None = None
+) -> list[Annotation]:
+    """Explode a COCO document back into one :class:`Annotation` per image.
+
+    This is what makes COCO a two-way format rather than an export-only dead
+    end. Images carrying no annotations are preserved as backgrounds, since in
+    COCO that absence is meaningful rather than incidental.
+
+    RLE segmentations (``iscrowd=1``, or a dict-valued ``segmentation``) cannot
+    become a polygon without a mask decoder, so the box is kept and the fact is
+    reported through ``unsupported_out`` rather than passed off as a polygon.
+    """
+    names = {c["id"]: str(c.get("name", f"class_{c['id']}")) for c in coco.get("categories", [])}
+    by_image: dict[int, Annotation] = {}
+
+    for image in coco.get("images", []):
+        by_image[image["id"]] = Annotation(
+            filename=Path(str(image.get("file_name", ""))).name,
+            width=int(image.get("width") or 0),
+            height=int(image.get("height") or 0),
+            shapes=[],
+        )
+
+    rle_count = 0
+    for ann in coco.get("annotations", []):
+        annotation = by_image.get(ann.get("image_id"))
+        if annotation is None:
+            continue
+        bbox = ann.get("bbox") or [0, 0, 0, 0]
+        try:
+            x, y, w, h = (float(v) for v in bbox[:4])
+        except (TypeError, ValueError):
+            continue
+
+        segmentation = ann.get("segmentation")
+        polygon: list[Point] | None = None
+        if isinstance(segmentation, dict) or ann.get("iscrowd"):
+            rle_count += 1
+        elif isinstance(segmentation, list) and segmentation:
+            polygon = _first_polygon(segmentation)
+
+        annotation.shapes.append(
+            Shape(
+                label=names.get(ann.get("category_id"), f"class_{ann.get('category_id')}"),
+                bbox=(
+                    int(round(x)),
+                    int(round(y)),
+                    int(round(x + w)),
+                    int(round(y + h)),
+                ),
+                polygon=polygon,
+            )
+        )
+
+    if rle_count and unsupported_out is not None:
+        unsupported_out.append(
+            f"{rle_count} RLE/crowd segmentation(s) kept as bounding boxes only"
+        )
+
+    # Recover sizes the document omitted, so a YOLO export downstream is not
+    # left dividing by zero.
+    for annotation in by_image.values():
+        if (annotation.width <= 0 or annotation.height <= 0) and annotation.shapes:
+            annotation.width = max(s.bbox[2] for s in annotation.shapes) + 1
+            annotation.height = max(s.bbox[3] for s in annotation.shapes) + 1
+
+    return [by_image[k] for k in sorted(by_image, key=lambda k: by_image[k].filename)]
+
+
+def _first_polygon(segmentation: list[Any]) -> list[Point] | None:
+    """Take the outer ring. Multi-part masks lose their holes, which is the
+    honest limit of a single-polygon model -- and what every VOC/YOLO consumer
+    downstream can represent anyway."""
+    for part in segmentation:
+        if isinstance(part, list) and len(part) >= 6:
+            values = [float(v) for v in part]
+            return [
+                (int(round(values[i])), int(round(values[i + 1])))
+                for i in range(0, len(values) - 1, 2)
+            ]
+    return None
+
+
+def find_annotation_files(folder: Path) -> list[Path]:
+    """Locate COCO json files under the layouts exporters actually produce."""
+    candidates: list[Path] = []
+    for pattern in ("_annotations.coco.json", "instances*.json", "*.json"):
+        for path in sorted(folder.glob(pattern)):
+            if path.is_file() and path not in candidates:
+                candidates.append(path)
+        if candidates:
+            break
+    annotations_dir = folder / "annotations"
+    if annotations_dir.is_dir():
+        for path in sorted(annotations_dir.glob("*.json")):
+            if path not in candidates:
+                candidates.append(path)
+    return candidates
 
 
 def summarise(coco: dict[str, Any]) -> dict[str, Any]:

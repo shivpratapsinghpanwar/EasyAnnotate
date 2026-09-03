@@ -12,7 +12,6 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
-from .. import fs
 from ..annotations import coco as coco_format
 from ..annotations import voc
 from ..annotations.model import AnnotationError

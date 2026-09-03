@@ -11,12 +11,15 @@ import argparse
 import json
 import sys
 import time
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Sequence, TextIO
+from typing import Any, TextIO
 
 from .. import __version__
-from ..core import ops  # noqa: F401  -- imported for registration side effects
-from ..core import registry
+from ..core import (
+    ops,  # noqa: F401  -- imported for registration side effects
+    registry,
+)
 from ..core.registry import Operation, ParamError
 from ..core.types import Cancelled, Context
 from . import render
