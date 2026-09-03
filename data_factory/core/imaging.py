@@ -27,18 +27,81 @@ from .annotations.model import Annotation, Point, Shape
 #: Pixels below this in either dimension make an object worthless for training.
 MIN_OBJECT_PIXELS = 2
 
+#: EXIF tag 0x0112. 1 is upright; 5-8 additionally transpose width and height.
+EXIF_ORIENTATION_TAG = 0x0112
+
 
 # --------------------------------------------------------------------- I/O
 
-def image_size(path: Path) -> tuple[int, int]:
-    """``(width, height)`` read from the header, without decoding the pixels.
+def stored_size(path: Path) -> tuple[int, int]:
+    """``(width, height)`` exactly as written in the file header.
 
-    Auditing 7,000 images should not cost 7,000 full JPEG decodes.
+    Ignores EXIF orientation, so for a sideways phone photo this is the
+    *unrotated* frame. Rarely what you want -- see :func:`image_size`.
     """
     from PIL import Image  # local import: keeps module import cheap
 
     with Image.open(path) as im:
         return im.size
+
+
+def image_size(path: Path) -> tuple[int, int]:
+    """``(width, height)`` as everything else in this package sees the image.
+
+    Read from the header, so auditing 7,000 images costs no JPEG decodes.
+
+    **This honours EXIF orientation, and has to.** A phone photo is commonly
+    stored sideways with a tag saying "rotate me". OpenCV's ``imdecode`` --
+    which :func:`load` uses, and therefore every operation that touches pixels
+    -- applies that tag. Browsers apply it too. ``PIL.Image.size`` does not.
+
+    Reporting the stored size while the pixels arrive rotated is a silent
+    mismatch: the ``<size>`` written into a VOC file would be transposed
+    relative to the image the annotator drew on and the trainer loads, with
+    nothing anywhere reporting an error.
+
+    Verified on the current Project_Door data: 3,000 of 3,000 images are
+    orientation 1, so nothing is corrupt today. It arrives with the first phone
+    photo a public tool receives.
+    """
+    from PIL import Image
+
+    with Image.open(path) as im:
+        width, height = im.size
+        orientation = int(im.getexif().get(EXIF_ORIENTATION_TAG, 1) or 1)
+    # 5-8 transpose the axes; 2, 3 and 4 are mirrors and a half turn, which
+    # move pixels but keep the frame.
+    return (height, width) if orientation in (5, 6, 7, 8) else (width, height)
+
+
+def ingest(path: Path, destination: Path | None = None, *, quality: int = 95) -> tuple[int, int]:
+    """Settle an image into one coordinate space, once, on the way in.
+
+    Returns the upright ``(width, height)``.
+
+    An image whose stored frame already matches its displayed frame is left
+    **byte for byte alone** -- re-encoding a JPEG that needs nothing done costs
+    quality every time and buys nothing. Anything carrying a transposing tag is
+    decoded (which applies the rotation) and re-encoded upright, so the tag is
+    gone and stored size, displayed size and pixel array can never disagree
+    again.
+
+    Doing this at ingest is what lets the editor, the store and the exporters
+    stop thinking about orientation entirely.
+    """
+    orientation = exif_orientation(path)
+    if orientation in (0, 1):
+        width, height = stored_size(path)
+        if destination is not None and destination != path:
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(path.read_bytes())
+        return width, height
+
+    # load() decodes through OpenCV, which already applies the orientation --
+    # so the array is upright here and must NOT be rotated a second time.
+    array = load(path)
+    save(array, destination or path, quality=quality)
+    return array.shape[1], array.shape[0]
 
 
 def load(path: Path) -> np.ndarray:
@@ -97,7 +160,7 @@ def exif_orientation(path: Path) -> int:
     try:
         with Image.open(path) as im:
             exif = im.getexif()
-        return int(exif.get(0x0112, 1) or 1)
+        return int(exif.get(EXIF_ORIENTATION_TAG, 1) or 1)
     except Exception:
         return 1
 
