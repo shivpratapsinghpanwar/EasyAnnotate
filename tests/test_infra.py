@@ -11,7 +11,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import make_image, make_pair
+from conftest import make_image
 
 import data_factory as df
 from data_factory.core import parallel, provenance

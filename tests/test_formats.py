@@ -271,6 +271,24 @@ class TestReadDataset:
         dataset = formats.read_dataset(tmp_path, "voc", recursive=True)
         assert sorted({i.split for i in dataset.items}) == ["train", "val"]
 
+    def test_a_split_coco_dataset_matches_images_to_the_right_split(self, tmp_path: Path):
+        """train/a.jpg and val/a.jpg are different images with the same name."""
+        src = tmp_path / "src"
+        make_pair(src / "train", "a", "Open", 1)
+        make_pair(src / "val", "a", "Close", 2)
+
+        source = formats.read_dataset(src, "voc", recursive=True)
+        out = tmp_path / "coco"
+        formats.write_dataset(source, out, "coco", ctx=Context())
+
+        back = formats.read_dataset(out, "coco")
+        by_split = {item.split: item for item in back.items}
+        assert set(by_split) == {"train", "val"}
+        # The val entry must point at val's file, not train's.
+        for split, item in by_split.items():
+            assert item.image is not None, split
+            assert split in {p.lower() for p in item.image.parts}, item.image
+
     def test_yolo_without_a_data_yaml_warns_about_the_class_names(self, tmp_path: Path):
         make_image(tmp_path / "a.jpg", 1)
         (tmp_path / "a.txt").write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")

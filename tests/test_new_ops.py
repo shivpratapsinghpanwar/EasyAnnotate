@@ -261,6 +261,33 @@ class TestAugment:
         assert box[2] > box[0] and box[3] > box[1]
         assert 0 <= box[0] and box[2] < 120
 
+    def test_rotation_keeps_the_output_size_uniform(self, clean_dataset: Path, tmp_path: Path):
+        """Rotation expands the canvas; without keep_size a 640 dataset comes
+        out with dozens of resolutions."""
+        from data_factory.core import imaging
+
+        out = tmp_path / "aug"
+        run(
+            "augment.dataset",
+            {"folder": str(clean_dataset), "output": str(out), "multiplier": 3,
+             "rotate": 20.0, "crop": 0.2, "flip_horizontal": True, "brightness": 0.0,
+             "seed": 4},
+        )
+        sizes = {imaging.image_size(p) for p in out.glob("*.jpg")}
+        assert sizes == {(120, 90)}, sizes
+
+    def test_keep_size_off_lets_the_canvas_grow(self, clean_dataset: Path, tmp_path: Path):
+        from data_factory.core import imaging
+
+        out = tmp_path / "aug"
+        run(
+            "augment.dataset",
+            {"folder": str(clean_dataset), "output": str(out), "multiplier": 3,
+             "rotate": 30.0, "brightness": 0.0, "keep_size": False,
+             "include_original": False, "seed": 4},
+        )
+        assert len({imaging.image_size(p) for p in out.glob("*.jpg")}) > 1
+
     def test_no_augmentations_enabled_fails_loudly(self, clean_dataset: Path, tmp_path: Path):
         result = run(
             "augment.dataset",

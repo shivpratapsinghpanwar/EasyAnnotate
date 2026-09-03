@@ -127,6 +127,12 @@ AUGMENT_PARAMS = (
         minimum=0.0,
         maximum=1.0,
     ),
+    Param(
+        "keep_size",
+        "bool",
+        "Letterbox variants back to their source size, so the output stays uniform.",
+        default=True,
+    ),
     Param("source_format", "choice", "Input format.", default="auto", choices=SOURCE_FORMATS),
     Param("format", "choice", "Output format.", default="same", choices=OUTPUT_FORMATS),
     Param("quality", "int", "JPEG/WebP quality.", default=95, minimum=1, maximum=100),
@@ -314,6 +320,7 @@ class _Plan:
     def __init__(self, params: dict[str, Any]) -> None:
         self.params = params
         self.min_visibility = params["min_visibility"]
+        self.keep_size = params["keep_size"]
         self.geometric = [
             name
             for name, on in (
@@ -350,6 +357,7 @@ class _Plan:
         used: list[str] = []
         pixels = array
         height, width = pixels.shape[:2]
+        source_size = (width, height)
         steps: list[imaging.Transform] = []
 
         for name in self.geometric:
@@ -363,6 +371,16 @@ class _Plan:
             steps.append(transform)
             width, height = transform.out_size
             used.append(name)
+
+        # Rotation expands the canvas to keep the corners, and random crop
+        # shrinks it, so a mixture of augmentations produces a mixture of
+        # sizes. Letterboxing back means a dataset resized to 640 stays at 640
+        # after augmentation instead of quietly acquiring 84 resolutions.
+        if steps and self.keep_size and (width, height) != source_size:
+            steps.append(
+                imaging.make_resize(width, height, source_size[0], source_size[1], "letterbox")
+            )
+            width, height = source_size
 
         if steps:
             combined = imaging.chain(*steps) if len(steps) > 1 else steps[0]

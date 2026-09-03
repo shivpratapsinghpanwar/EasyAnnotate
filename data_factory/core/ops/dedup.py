@@ -14,10 +14,9 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from .. import fs
+from .. import fs, parallel
 from ..bktree import BKTree
 from ..pairs import PairIndex, sidecar_for
-from .. import parallel
 from ..registry import Param, operation
 from ..types import Action, Context, OpResult
 

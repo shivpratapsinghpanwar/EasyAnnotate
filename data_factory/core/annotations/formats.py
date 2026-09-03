@@ -22,7 +22,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from .. import fs
+from .. import fs, parallel
 from ..pairs import PairIndex
 from ..types import Action, Context
 from . import coco as coco_fmt
@@ -225,13 +225,32 @@ def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
             "Point --classes at the right file to keep the real names."
         )
 
-    for image in fs.iter_images(folder, recursive=recursive):
+    # YOLO stores coordinates normalised, so every label needs its image's
+    # dimensions before it can be read at all -- one header read per image.
+    # Serial, that is the dominant cost of loading a large YOLO dataset.
+    images = list(fs.iter_images(folder, recursive=recursive))
+    sizes = dict(
+        parallel.collect(
+            images,
+            _image_size,
+            ctx=ctx,
+            label=lambda image: image.name,
+            on_error=lambda image, exc: dataset.warnings.append(
+                f"{image.name}: cannot read image size ({exc})"
+            ),
+        )
+    )
+
+    for image in images:
         label_path = yolo.label_path_for(image, folder)
-        width, height = _size_of(image, dataset)
+        width, height = sizes.get(image, (0, 0))
         if width <= 0:
             continue
         if not label_path.is_file():
-            dataset.items.append(Item(annotation=_empty_annotation(image), image=image))
+            dataset.items.append(
+                Item(annotation=Annotation(filename=image.name, width=width, height=height),
+                     image=image)
+            )
             continue
         try:
             annotation = yolo.read(
@@ -264,9 +283,7 @@ def _read_coco(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         document = coco_fmt.load(path)
         split = _split_of(path.stem)
         for annotation in coco_fmt.to_annotations(document, unsupported_out=unsupported):
-            image = images_by_name.get(annotation.filename) or images_by_name.get(
-                Path(annotation.filename).stem
-            )
+            image = _pick_image(images_by_name, annotation.filename, split)
             dataset.items.append(Item(annotation=annotation, image=image, split=split))
         for category in document.get("categories", []):
             name = str(category.get("name", ""))
@@ -285,26 +302,48 @@ def _read_csv(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     images_by_name = _image_index(folder)
     for path in candidates:
         for annotation in csvfmt.read(path):
-            image = images_by_name.get(annotation.filename) or images_by_name.get(
-                Path(annotation.filename).stem
-            )
+            image = _pick_image(images_by_name, annotation.filename)
             if image is not None and annotation.width <= 0:
                 annotation.width, annotation.height = _size_of(image, dataset)
             dataset.items.append(Item(annotation=annotation, image=image))
     return dataset
 
 
-def _image_index(folder: Path) -> dict[str, Path]:
+def _image_index(folder: Path) -> dict[str, list[Path]]:
     """Every image under a folder, findable by both name and stem.
 
     COCO and CSV reference images by name only, so the file could be anywhere
-    in the tree. First match wins in sorted order, keeping it reproducible.
+    in the tree -- and in a split dataset ``a.jpg`` legitimately exists in both
+    ``train/`` and ``val/``. Every candidate is kept so the caller can pick the
+    one in the right split rather than whichever sorted first.
     """
-    index: dict[str, Path] = {}
+    index: dict[str, list[Path]] = {}
     for image in fs.iter_images(folder, recursive=True):
-        index.setdefault(image.name, image)
-        index.setdefault(image.stem, image)
+        index.setdefault(image.name, []).append(image)
+        if image.stem != image.name:
+            index.setdefault(image.stem, []).append(image)
     return index
+
+
+def _pick_image(
+    index: dict[str, list[Path]], filename: str, split: str = ""
+) -> Path | None:
+    """Resolve a referenced filename to an actual file, preferring its split.
+
+    Without the split preference, a COCO dataset whose train and val folders
+    share a filename would attach val's annotations to train's image -- wrong
+    in a way nothing downstream could detect.
+    """
+    candidates = index.get(filename) or index.get(Path(filename).name) or index.get(
+        Path(filename).stem
+    )
+    if not candidates:
+        return None
+    if split:
+        for candidate in candidates:
+            if split in {part.lower() for part in candidate.parts}:
+                return candidate
+    return candidates[0]
 
 
 def _empty_annotation(image: Path) -> Annotation:

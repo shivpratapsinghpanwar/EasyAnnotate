@@ -200,6 +200,21 @@ noticed. `inspect.leakage` finds the other expensive one — the same photo in
 both train and val, which makes a validation score measure memorisation and
 looks excellent right up until deployment.
 
+Running `recipes/train_ready_yolo.yaml` over that same folder end to end:
+
+| Step | Result |
+|---|---|
+| `labels.rename --fold-case` | 1,145 objects renamed across 1,088 files — 4 classes → 2 |
+| `dataset.split` | 2,948 / 369 / 369, stratified and seeded |
+| `inspect.leakage` | 0 leaked pairs across 3 splits |
+| `convert.dataset --to yolo` | 3,686 images, 3,871 objects, 2 classes |
+| `image.resize 640 letterbox` | 3,686 resized, 0 objects dropped |
+| `augment.dataset ×2, train only` | 9,582 total images, 10,067 objects |
+| `inspect.health` on the result | **0 errors, 0 warnings, 1 resolution** |
+
+The finished dataset is what the health check now has nothing to say about —
+which is the point of the health check.
+
 ---
 
 ## As a library, and in a web app
@@ -262,19 +277,29 @@ truthful record.
 ## Performance
 
 Decode-bound stages run across threads, in input order, so results stay
-reproducible. Perceptual dedup over the real 2,783-image V2 set:
+reproducible. Measured on the real Project_Door set:
 
-| | Time | Result |
-|---|---|---|
-| `--workers 1` | 95.6s | 2,783 scanned, 2 duplicates |
-| `--workers 0` (auto) | 33.2s | 2,783 scanned, 2 duplicates |
+| Stage | Serial | Parallel | |
+|---|---|---|---|
+| `image.resize` — 3,686 images | 186.6s | 24.2s | 7.7× |
+| `clean.dedup` — perceptual, 2,783 images | 95.6s | 33.2s | 2.9× |
+| `augment.dataset` — 5,896 variants | 288.4s | 124.0s | 2.3× |
+| `inspect.health` — 9,582 images | 217.7s | 112.4s | 1.9× |
 
-Identical output, 2.9× faster. Order is preserved deliberately: dedup keeps the
-first image it sees, so a result that depended on which thread finished first
-would not be reproducible.
+Output is byte-identical either way. Order is preserved deliberately: dedup
+keeps the first image it sees, and COCO image ids follow write order, so a
+result that depended on which thread finished first would not be reproducible.
+Parallelism is confined to pure functions; writing stays on the calling thread.
+
+The map used for image work is *bounded* — the hashing map submits every task
+up front, which is right when a result is eight bytes and catastrophic when it
+is a decoded frame, so image stages keep only a few in flight and memory stays
+flat regardless of dataset size.
 
 The BK-tree handles the other half — comparing every hash to every other is
 O(n²), about 112 million comparisons on a 15k-image set.
+
+Set `--workers N` to override; `0` (the default) picks a sensible count.
 
 ---
 
@@ -362,7 +387,7 @@ not batch operations.
 ## Tests
 
 ```bash
-uv run pytest          # 280 tests
+uv run pytest          # 284 tests
 ```
 
 Fixtures build a small dataset carrying every defect the real one had: case
