@@ -1,0 +1,30 @@
+﻿
+300 shapes, 4000x3000 image, 1600x1000 viewport. Budget 16.7ms/frame for 60fps.
+
+cost of one draw(), by zoom level:
+  PASS  draw at fit (whole image)              p50   0.60ms  p95   1.20ms  worst 2035.30ms
+  PASS  draw at 1:1                            p50   4.70ms  p95   7.30ms  worst   8.70ms
+  PASS  draw at 3x zoomed in                   p50   3.40ms  p95   4.40ms  worst   5.30ms
+
+cost of one hit-test (paid on every pointer move):
+  PASS  hit-test, 300 shapes                   p50   0.00ms  p95   0.10ms  worst   0.90ms
+
+sustained interaction, driven by requestAnimationFrame:
+  (the loop is vsync-locked, so a p50 of 16.7ms IS 60fps -- judge the interval
+   by p50, and judge our own cost by draw())
+  PASS  pan: sustained                           60 fps (interval p50 16.70ms)
+  PASS  pan: our draw() within the frame       p50   0.60ms  p95   1.00ms  worst   1.30ms
+  PASS  zoom: sustained                          60 fps (interval p50 16.70ms)
+  PASS  zoom: our draw() within the frame      p50   0.90ms  p95   4.50ms  worst   6.10ms
+  PASS  drag: sustained                          60 fps (interval p50 16.70ms)
+  PASS  drag: our draw() within the frame      p50   0.70ms  p95   1.20ms  worst   1.50ms
+
+headroom -- how many shapes before it breaks:
+  (p50 is the honest steady-state cost; a large gap to p95 is a GC pause, not
+   per-frame work)
+  PASS     300 shapes   draw p50   0.50ms  p95    1.10ms   hit-test p50 0.000ms p95 0.200ms
+  PASS    1000 shapes   draw p50   1.50ms  p95    2.80ms   hit-test p50 0.000ms p95 0.200ms
+  PASS    3000 shapes   draw p50   4.60ms  p95 1186.80ms   hit-test p50 0.000ms p95 0.300ms
+  OVER   10000 shapes   draw p50  21.20ms  p95 1196.80ms   hit-test p50 0.000ms p95 0.400ms
+
+worst cost of our own draw() during sustained interaction: 4.50ms of the 16.7ms frame (27% of the budget)

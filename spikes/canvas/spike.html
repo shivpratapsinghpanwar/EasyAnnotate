@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Canvas spike</title>
+<style>
+  html,body{margin:0;height:100%;background:#12181d;color:#e8eef2;
+    font:13px ui-monospace,Consolas,monospace;overflow:hidden}
+  #stage{position:absolute;inset:0}
+  canvas{display:block;width:100%;height:100%;cursor:crosshair}
+  #hud{position:absolute;top:8px;left:8px;background:rgba(0,0,0,.65);
+    padding:8px 10px;border-radius:6px;line-height:1.5;pointer-events:none}
+  b{color:#4fc0ac}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="c"></canvas></div>
+<div id="hud"></div>
+<script type="module">
+// The spike: is a hand-written canvas fast enough for a real annotation editor?
+// Deliberately built the way the real one would be -- a retained scene model, a
+// viewport transform, real hit-testing against every shape, and an rAF render
+// loop -- so the number it produces means something.
+
+const SHAPE_COUNT = Number(new URLSearchParams(location.search).get("shapes") || 300);
+const IMAGE_W = 4000, IMAGE_H = 3000;
+
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d", { alpha: false });
+const hud = document.getElementById("hud");
+
+// ---- a stand-in for the photo, built once at full resolution -------------
+const source = document.createElement("canvas");
+source.width = IMAGE_W; source.height = IMAGE_H;
+{
+  const g = source.getContext("2d");
+  const grad = g.createLinearGradient(0, 0, IMAGE_W, IMAGE_H);
+  grad.addColorStop(0, "#26323a"); grad.addColorStop(1, "#5a6b52");
+  g.fillStyle = grad; g.fillRect(0, 0, IMAGE_W, IMAGE_H);
+  for (let i = 0; i < 400; i++) {           // texture, so scaling has real work
+    g.fillStyle = `hsl(${(i * 37) % 360} 40% ${25 + (i % 30)}%)`;
+    g.fillRect((i * 617) % IMAGE_W, (i * 331) % IMAGE_H, 120, 90);
+  }
+}
+// Mip levels: the source at full size, then repeatedly halved.
+//
+// Measured first without this, and it was the one real bottleneck: drawing the
+// 4000x3000 bitmap scaled down to fit a 1600x1000 viewport cost 29ms per frame
+// (p95 42ms), because the browser resamples 12 megapixels every time. At 1:1 it
+// cost 4.8ms, since only the visible region is sampled. Picking a level near
+// the display size means we never ask it to do that work more than once.
+const mips = [];
+{
+  let level = source;
+  mips.push(await createImageBitmap(level));
+  while (level.width > 64 && level.height > 64) {
+    const half = document.createElement("canvas");
+    half.width = Math.max(1, level.width >> 1);
+    half.height = Math.max(1, level.height >> 1);
+    const g = half.getContext("2d");
+    g.imageSmoothingEnabled = true;
+    g.imageSmoothingQuality = "high";
+    g.drawImage(level, 0, 0, half.width, half.height);
+    mips.push(await createImageBitmap(half));
+    level = half;
+  }
+}
+
+/** The smallest level still at least as wide as we are about to draw. */
+function mipFor(displayWidth) {
+  let chosen = mips[0];
+  for (const candidate of mips) {
+    if (candidate.width >= displayWidth) chosen = candidate;
+    else break;
+  }
+  return chosen;
+}
+
+// ---- scene ---------------------------------------------------------------
+const PALETTE = ["#4fc0ac", "#e8a33a", "#6aa9ff", "#e0786f", "#9ad06a"];
+const scene = { shapes: new Map(), order: [], selection: new Set(), hover: null };
+
+let nextId = 1;
+for (let i = 0; i < SHAPE_COUNT; i++) {
+  const id = `s${nextId++}`;
+  const w = 60 + (i * 53) % 420, h = 50 + (i * 97) % 360;
+  const x = (i * 811) % (IMAGE_W - w), y = (i * 439) % (IMAGE_H - h);
+  const polygon = i % 3 === 0
+    ? Array.from({ length: 12 }, (_, k) => {
+        const a = (k / 12) * Math.PI * 2;
+        return [x + w / 2 + Math.cos(a) * w / 2, y + h / 2 + Math.sin(a) * h / 2];
+      })
+    : null;
+  scene.shapes.set(id, {
+    id, labelIdx: i % PALETTE.length, kind: polygon ? "polygon" : "box",
+    bbox: [x, y, x + w, y + h], polygon,
+    origin: i % 4 === 0 ? "model" : "human", confidence: i % 4 === 0 ? 0.3 + (i % 7) / 10 : null,
+  });
+  scene.order.push(id);
+}
+
+// ---- viewport ------------------------------------------------------------
+const view = { scale: 1, tx: 0, ty: 0 };
+const toImage = (px, py) => [(px - view.tx) / view.scale, (py - view.ty) / view.scale];
+
+function fit() {
+  const r = canvas.getBoundingClientRect();
+  view.scale = Math.min(r.width / IMAGE_W, r.height / IMAGE_H) * 0.95;
+  view.tx = (r.width - IMAGE_W * view.scale) / 2;
+  view.ty = (r.height - IMAGE_H * view.scale) / 2;
+}
+
+function resize() {
+  const r = canvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(r.width * dpr);
+  canvas.height = Math.round(r.height * dpr);
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+new ResizeObserver(() => { resize(); fit(); invalidate(); }).observe(canvas);
+
+// ---- hit testing ---------------------------------------------------------
+// Priority mirrors the real editor: handles of the selected shape, then its
+// vertices, then bodies topmost-first. Tolerance is constant in screen pixels,
+// so a handle feels the same size at every zoom.
+const TOLERANCE = 10;
+
+function hitTest(ix, iy) {
+  const tol = TOLERANCE / view.scale;
+  for (const id of scene.selection) {
+    const shape = scene.shapes.get(id);
+    if (!shape) continue;
+    const [x1, y1, x2, y2] = shape.bbox;
+    const handles = [[x1,y1],[x2,y1],[x2,y2],[x1,y2],
+                     [(x1+x2)/2,y1],[(x1+x2)/2,y2],[x1,(y1+y2)/2],[x2,(y1+y2)/2]];
+    for (let h = 0; h < handles.length; h++) {
+      if (Math.abs(ix - handles[h][0]) <= tol && Math.abs(iy - handles[h][1]) <= tol)
+        return { id, part: `handle-${h}` };
+    }
+    if (shape.polygon) {
+      for (let v = 0; v < shape.polygon.length; v++) {
+        const [vx, vy] = shape.polygon[v];
+        if (Math.abs(ix - vx) <= tol && Math.abs(iy - vy) <= tol)
+          return { id, part: `vertex-${v}` };
+      }
+    }
+  }
+  for (let i = scene.order.length - 1; i >= 0; i--) {
+    const shape = scene.shapes.get(scene.order[i]);
+    if (shape.polygon ? pointInPolygon(ix, iy, shape.polygon) : inBox(ix, iy, shape.bbox))
+      return { id: shape.id, part: "body" };
+  }
+  return null;
+}
+
+const inBox = (x, y, [x1, y1, x2, y2]) => x >= x1 && x <= x2 && y >= y1 && y <= y2;
+
+function pointInPolygon(x, y, points) {
+  let inside = false;
+  for (let i = 0, j = points.length - 1; i < points.length; j = i++) {
+    const [xi, yi] = points[i], [xj, yj] = points[j];
+    if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+
+// ---- render --------------------------------------------------------------
+let dirty = true;
+const invalidate = () => { dirty = true; };
+
+function draw() {
+  const r = canvas.getBoundingClientRect();
+  ctx.fillStyle = "#0f1413";
+  ctx.fillRect(0, 0, r.width, r.height);
+
+  ctx.save();
+  ctx.translate(view.tx, view.ty);
+  ctx.scale(view.scale, view.scale);
+  // Draw from a mip near the size we need, so the browser is never asked to
+  // resample 12 megapixels down to 1600 wide on every frame.
+  const mip = mipFor(IMAGE_W * view.scale);
+  if (mip.width === IMAGE_W) {
+    // Full resolution: the plain three-argument form, which keeps the fast
+    // blit path. Measured: the explicit source-rectangle form costs 15ms here
+    // against 4.8ms for this one, for identical output.
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(mip, 0, 0);
+  } else {
+    ctx.imageSmoothingEnabled = true;
+    ctx.drawImage(mip, 0, 0, mip.width, mip.height, 0, 0, IMAGE_W, IMAGE_H);
+  }
+
+  // Line widths are divided by scale so strokes stay 2 screen pixels at any
+  // zoom -- the thing that makes a canvas editor feel native rather than
+  // like a zoomed image of an editor.
+  const unit = 1 / view.scale;
+  for (const id of scene.order) {
+    const shape = scene.shapes.get(id);
+    const colour = PALETTE[shape.labelIdx];
+    const selected = scene.selection.has(id);
+    ctx.strokeStyle = colour;
+    ctx.lineWidth = (selected ? 3 : 2) * unit;
+    // Model shapes dashed, human solid -- reads at any zoom and survives
+    // colour blindness, unlike a hue change.
+    ctx.setLineDash(shape.origin === "model" && !selected ? [8 * unit, 6 * unit] : []);
+    ctx.globalAlpha = shape.confidence == null ? 1 : 0.45 + 0.55 * shape.confidence;
+
+    if (shape.polygon) {
+      ctx.beginPath();
+      ctx.moveTo(shape.polygon[0][0], shape.polygon[0][1]);
+      for (let i = 1; i < shape.polygon.length; i++)
+        ctx.lineTo(shape.polygon[i][0], shape.polygon[i][1]);
+      ctx.closePath();
+      ctx.stroke();
+    } else {
+      const [x1, y1, x2, y2] = shape.bbox;
+      ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+    }
+
+    if (selected) {
+      ctx.setLineDash([]);
+      ctx.fillStyle = colour;
+      const [x1, y1, x2, y2] = shape.bbox;
+      const s = 5 * unit;
+      for (const [hx, hy] of [[x1,y1],[x2,y1],[x2,y2],[x1,y2],
+                              [(x1+x2)/2,y1],[(x1+x2)/2,y2],[x1,(y1+y2)/2],[x2,(y1+y2)/2]])
+        ctx.fillRect(hx - s, hy - s, s * 2, s * 2);
+    }
+  }
+  ctx.globalAlpha = 1;
+  ctx.setLineDash([]);
+  ctx.restore();
+}
+
+// ---- frame loop and instrumentation --------------------------------------
+const frames = [];
+let lastFrame = performance.now();
+
+function loop(now) {
+  if (dirty) {
+    dirty = false;
+    draw();
+    frames.push(now - lastFrame);
+    if (frames.length > 600) frames.shift();
+  }
+  lastFrame = now;
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+// ---- interaction ---------------------------------------------------------
+let drag = null;
+
+canvas.addEventListener("pointerdown", (e) => {
+  canvas.setPointerCapture(e.pointerId);
+  const [ix, iy] = toImage(e.offsetX, e.offsetY);
+  const hit = hitTest(ix, iy);
+  if (hit) {
+    scene.selection.clear();
+    scene.selection.add(hit.id);
+    drag = { id: hit.id, part: hit.part, ix, iy };
+  } else {
+    scene.selection.clear();
+    drag = { pan: true, x: e.offsetX, y: e.offsetY };
+  }
+  invalidate();
+});
+
+canvas.addEventListener("pointermove", (e) => {
+  if (drag && drag.pan) {
+    view.tx += e.offsetX - drag.x; view.ty += e.offsetY - drag.y;
+    drag.x = e.offsetX; drag.y = e.offsetY;
+    invalidate();
+    return;
+  }
+  const [ix, iy] = toImage(e.offsetX, e.offsetY);
+  if (drag) {
+    const shape = scene.shapes.get(drag.id);
+    const dx = ix - drag.ix, dy = iy - drag.iy;
+    if (drag.part === "body") {
+      shape.bbox = shape.bbox.map((v, i) => v + (i % 2 === 0 ? dx : dy));
+      if (shape.polygon) shape.polygon = shape.polygon.map(([x, y]) => [x + dx, y + dy]);
+    } else if (drag.part.startsWith("handle-")) {
+      const h = Number(drag.part.slice(7));
+      const b = shape.bbox.slice();
+      if (h === 0 || h === 3 || h === 6) b[0] += dx;
+      if (h === 1 || h === 2 || h === 7) b[2] += dx;
+      if (h === 0 || h === 1 || h === 4) b[1] += dy;
+      if (h === 2 || h === 3 || h === 5) b[3] += dy;
+      shape.bbox = b;
+    } else if (drag.part.startsWith("vertex-")) {
+      const v = Number(drag.part.slice(7));
+      shape.polygon[v] = [ix, iy];
+    }
+    drag.ix = ix; drag.iy = iy;
+    invalidate();
+    return;
+  }
+  // Hover hit-testing on every move: this is the per-frame cost that has to
+  // stay cheap, because it runs whether or not anything is being dragged.
+  const hit = hitTest(ix, iy);
+  const id = hit ? hit.id : null;
+  if (id !== scene.hover) { scene.hover = id; invalidate(); }
+});
+
+canvas.addEventListener("pointerup", () => { drag = null; });
+
+canvas.addEventListener("wheel", (e) => {
+  e.preventDefault();
+  const factor = Math.exp(-e.deltaY * 0.0015);
+  const [ix, iy] = toImage(e.offsetX, e.offsetY);
+  view.scale = Math.max(0.02, Math.min(20, view.scale * factor));
+  view.tx = e.offsetX - ix * view.scale;
+  view.ty = e.offsetY - iy * view.scale;
+  invalidate();
+}, { passive: false });
+
+resize(); fit(); invalidate();
+
+setInterval(() => {
+  const sorted = frames.slice().sort((a, b) => a - b);
+  const p50 = sorted[Math.floor(sorted.length * 0.5)] || 0;
+  const p95 = sorted[Math.floor(sorted.length * 0.95)] || 0;
+  hud.innerHTML =
+    `shapes <b>${scene.shapes.size}</b> · zoom <b>${view.scale.toFixed(2)}x</b><br>` +
+    `frame p50 <b>${p50.toFixed(1)}ms</b> · p95 <b>${p95.toFixed(1)}ms</b><br>` +
+    `drag a shape · wheel to zoom · drag background to pan`;
+}, 250);
+
+// ---- the harness reads these ---------------------------------------------
+// Driving this from Playwright measures Playwright: a synthetic pointer move
+// costs ~20ms of CDP round trip, which swamps the render. So the interesting
+// numbers are taken in-page -- the cost of draw() itself, and the frame
+// interval of a loop that invalidates every frame.
+
+const percentile = (values, p) => {
+  const sorted = values.slice().sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * p))] || 0;
+};
+
+function summarise(values) {
+  return {
+    samples: values.length,
+    p50: percentile(values, 0.5),
+    p95: percentile(values, 0.95),
+    worst: values.length ? Math.max(...values) : 0,
+  };
+}
+
+window.__spike = {
+  shapeCount: () => scene.shapes.size,
+  zoom: (s) => { view.scale = s; invalidate(); },
+
+  /** Time draw() alone, with nothing else in the way. */
+  measureDraw(iterations = 120) {
+    const samples = [];
+    for (let i = 0; i < iterations; i++) {
+      view.tx += 1;                        // force genuinely different output
+      const t0 = performance.now();
+      draw();
+      samples.push(performance.now() - t0);
+    }
+    return summarise(samples);
+  },
+
+  /** Time hit-testing alone -- the cost paid on every pointer move. */
+  measureHitTest(iterations = 2000) {
+    const samples = [];
+    for (let i = 0; i < iterations; i++) {
+      const x = (i * 137) % IMAGE_W, y = (i * 79) % IMAGE_H;
+      const t0 = performance.now();
+      hitTest(x, y);
+      samples.push(performance.now() - t0);
+    }
+    return summarise(samples);
+  },
+
+  /** Sustained interaction: pan every frame for `ms`, driven by rAF. */
+  stress(ms = 2000, mode = "pan") {
+    return new Promise((resolve) => {
+      const intervals = [], draws = [];
+      let previous = performance.now();
+      const started = previous;
+      let tick = 0;
+
+      const step = (now) => {
+        intervals.push(now - previous);
+        previous = now;
+        tick++;
+
+        if (mode === "pan") { view.tx += 3; view.ty += 1; }
+        else if (mode === "zoom") { view.scale *= tick % 120 < 60 ? 1.01 : 1 / 1.01; }
+        else if (mode === "drag") {
+          const shape = scene.shapes.get(scene.order[tick % scene.order.length]);
+          scene.selection.clear(); scene.selection.add(shape.id);
+          hitTest(shape.bbox[0] + 2, shape.bbox[1] + 2);   // pay the hover cost too
+          shape.bbox = shape.bbox.map((v, i) => v + (i % 2 === 0 ? 1 : 0.5));
+        }
+
+        const t0 = performance.now();
+        draw();
+        draws.push(performance.now() - t0);
+
+        if (now - started < ms) requestAnimationFrame(step);
+        else resolve({ frame: summarise(intervals.slice(2)), draw: summarise(draws.slice(2)) });
+      };
+      requestAnimationFrame(step);
+    });
+  },
+};
+window.__ready = true;
+</script>
+</body>
+</html>
