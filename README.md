@@ -4,7 +4,7 @@ Dataset preparation for computer vision — convert, clean, preprocess, augment,
 analyse and export — as **one tool** with a library, a CLI, an interactive menu,
 and a YAML pipeline runner over a single shared core.
 
-*Author: Shivpratap Singh Panwar (Kody Technolab Public Limited). Originally
+*Author: Shivpratap Singh Panwar  Originally
 created 22 July 2026 as a folder of task-specific scripts; consolidated into
 this package.*
 
