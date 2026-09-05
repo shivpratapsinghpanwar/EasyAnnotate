@@ -40,8 +40,16 @@ ENV PYTHONUNBUFFERED=1 \
     DATAFACTORY_WORKSPACE=/data \
     PIP_NO_CACHE_DIR=1
 
-COPY --from=build /dist/*.whl /tmp/
-RUN pip install --no-cache-dir /tmp/*.whl[web] && rm /tmp/*.whl
+COPY --from=build /dist/*.whl /tmp/dist/
+# The obvious `pip install /tmp/*.whl[web]` does not work, and fails in a way
+# that looks like pip's fault. `[web]` is a shell *character class* -- match one
+# of w, e, b -- so the pattern needs a character after `.whl`, our wheel has
+# none, the glob matches nothing, and sh hands pip the literal string
+# `/tmp/*.whl[web]`. Resolving the name first and quoting the extra is what
+# actually installs the wheel with its extra.
+RUN WHEEL="$(ls /tmp/dist/*.whl)" \
+ && pip install --no-cache-dir "${WHEEL}[web]" \
+ && rm -rf /tmp/dist
 
 # A named volume belongs here: uploads are large, and a container filesystem
 # is the wrong place to accumulate them.
