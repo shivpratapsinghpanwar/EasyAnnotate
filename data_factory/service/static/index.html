@@ -112,9 +112,15 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg);padding:.08em 
     <div id="classes"></div>
     <p class="note" id="expiry"></p>
     <div class="row" style="margin-top:.8rem">
+      <button class="primary" id="btnAnnotate">Start annotating</button>
       <button id="btnDownloadSrc">Download source</button>
       <button id="btnForget">Start over</button>
     </div>
+    <p class="note" id="annotateNote" style="margin:.6rem 0 0">
+      Opens the editor. Any annotations already in this upload are imported, and
+      an existing class order is kept as-is so indices you have already exported
+      stay valid.
+    </p>
   </div>
 
   <!-- results -->
@@ -272,6 +278,29 @@ function updateButtons(){
   $("btnRun").disabled = !ready;
   $("btnPreview").disabled = !ready;
 }
+
+// Promotion is the moment an anonymous upload becomes somebody's work: it
+// stops expiring, and gains a class order that later exports are held to.
+$("btnAnnotate").onclick = async () => {
+  if(!dataset) return;
+  const button = $("btnAnnotate");
+  button.disabled = true;
+  button.textContent = "Preparing…";
+  try{
+    const response = await api(`/datasets/${dataset.id}/promote`, {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({}),
+    });
+    const project = await response.json();
+    if(!response.ok) throw new Error(project.detail || "could not start annotating");
+    window.location = `/annotate?project=${encodeURIComponent(project.id)}`;
+  }catch(error){
+    $("annotateNote").textContent = String(error.message || error);
+    button.disabled = false;
+    button.textContent = "Start annotating";
+  }
+};
 
 // ---------------------------------------------------------------- running
 $("btnRun").onclick = () => run(false);

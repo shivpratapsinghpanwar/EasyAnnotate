@@ -14,9 +14,11 @@ so a detection-only dataset produces an unremarkable eight-column file.
 from __future__ import annotations
 
 import csv
+import io
 from collections.abc import Iterable, Sequence
 from pathlib import Path
 
+from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 HEADER = ("filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax", "polygon")
@@ -51,32 +53,34 @@ def write(annotations: Iterable[Annotation], path: Path) -> Path:
     lose them -- an image absent from the CSV is indistinguishable from one
     that was never annotated.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as handle:
-        writer = csv.writer(handle)
-        writer.writerow(HEADER)
-        for annotation in annotations:
-            if annotation.is_background:
-                writer.writerow(
-                    [annotation.filename, annotation.width, annotation.height, "", "", "", "", "", ""]
-                )
-                continue
-            for shape in annotation.shapes:
-                polygon = ""
-                if shape.has_polygon:
-                    assert shape.polygon is not None
-                    polygon = " ".join(f"{int(x)} {int(y)}" for x, y in shape.polygon)
-                writer.writerow(
-                    [
-                        annotation.filename,
-                        annotation.width,
-                        annotation.height,
-                        shape.label,
-                        *shape.bbox,
-                        polygon,
-                    ]
-                )
-    return path
+    # Built in memory and written in one atomic swap, so a crash part-way
+    # through cannot leave a truncated CSV where a complete one used to be.
+    buffer = io.StringIO(newline="")
+    writer = csv.writer(buffer)
+    writer.writerow(HEADER)
+    for annotation in annotations:
+        if annotation.is_background:
+            writer.writerow(
+                [annotation.filename, annotation.width, annotation.height, "", "", "", "", "", ""]
+            )
+            continue
+        for shape in annotation.shapes:
+            polygon = ""
+            if shape.has_polygon:
+                assert shape.polygon is not None
+                polygon = " ".join(f"{int(x)} {int(y)}" for x, y in shape.polygon)
+            writer.writerow(
+                [
+                    annotation.filename,
+                    annotation.width,
+                    annotation.height,
+                    shape.label,
+                    *shape.bbox,
+                    polygon,
+                ]
+            )
+    # newline="" because csv already emitted its own \r\n terminators.
+    return write_text_atomic(path, buffer.getvalue(), newline="")
 
 
 def read(path: Path) -> list[Annotation]:

@@ -53,9 +53,20 @@ web = [
     "python-multipart>=0.0.9",
 ]
 
-# SAM-assisted segmentation. Deliberately isolated: the core pipeline has no
-# deep-learning dependency, so CI and web backends install in seconds.
-sam = ["torch>=2.2", "sam2>=1.0"]
+# SAM-assisted segmentation.
+#
+# REMOVED, not fixed. It used to read `sam = ["torch>=2.2", "sam2>=1.0"]`, and
+# `sam2` is not published on PyPI under that name -- Meta ships it from GitHub
+# -- so `pip install "data-factory[sam]"` failed at resolution. An extra that
+# cannot install is worse than one that does not exist: it advertises a feature
+# and then blames the user's environment.
+#
+# The deeper reason it is gone is that an extra installs into the *same*
+# environment, which puts torch's version matrix in the way of a tool whose
+# core needs numpy and Pillow. Heavy models run behind a process boundary
+# instead (see data_factory/annotate/tools/), so they are a separate
+# distribution with its own interpreter, discovered at runtime and absent
+# without complaint. Point DATAFACTORY_TOOLS_MODULE at one to enable it.
 
 # Everything a contributor needs.
 dev = [

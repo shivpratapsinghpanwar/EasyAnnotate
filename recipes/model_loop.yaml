@@ -1,0 +1,130 @@
+# One turn of the model loop, written down so it is reproducible.
+#
+#   datafactory run recipes/model_loop.yaml \
+#       --set db=~/.datafactory/annotations.db \
+#       --set project=<project id> \
+#       --set images=D:/my/photos \
+#       --set out=D:/my/round-2 --dry-run
+#
+# The loop: annotate by hand → train → run inference → load the predictions
+# back into the editor → correct them → run this again. Each turn costs less
+# than the one before, because each turn starts from a better model.
+#
+# This recipe is the *export half* of that turn: it takes what you have
+# reviewed in the editor and produces a training set, then measures it. Getting
+# the predictions back in is a step you do in the browser (Load model
+# predictions…) or with a POST to /api/projects/<id>/predictions.
+#
+# Find your project id with:
+#
+#   datafactory annotate <folder>          # prints it, and opens the editor
+#
+# Two things worth understanding before you run it:
+#
+#   The export takes REVIEWED IMAGES ONLY. That is the point of the loop, not
+#     an inconvenience. Feeding a model its own unreviewed predictions back as
+#     ground truth teaches it its own mistakes, and nothing about the output
+#     looks wrong when it happens. If you want to widen it, do so explicitly
+#     by setting `states` -- and know why you are doing it.
+#
+#   The class order comes from the project's label table, and it does not
+#     move. A class renamed after your last export keeps its index, so the
+#     .txt files you trained on last month still mean what they said. This is
+#     the whole reason the label table exists.
+
+name: model-loop
+description: Export reviewed annotations, build a training set, and measure it.
+
+vars:
+  db: ~/.datafactory/annotations.db   # the annotation database
+  project: SET-YOUR-PROJECT-ID        # required: pass --set project=<id>
+  out: ./round                        # everything this recipe produces
+  size: 640
+  seed: 42
+
+steps:
+  # Reviewed images only. See the note above.
+  - name: export what has been reviewed
+    op: annotate.export
+    with:
+      database: "${db}"
+      project: "${project}"
+      # 'images' is deliberately not set. Left alone, the export finds them
+      # itself: an attached project's own folder, or the media beside the
+      # database for a managed one. Setting it to a folder that is not there
+      # is now a hard error rather than a silent labels-only export.
+      output: "${out}/reviewed"
+      to: voc
+      states: reviewed
+
+  # What did we just get? Class balance and object sizes decide whether this
+  # is worth training on at all, and it is cheaper to find out now.
+  - name: what classes came out
+    op: labels.list
+    with:
+      folder: "${out}/reviewed"
+
+  - name: health check
+    op: inspect.health
+    with:
+      folder: "${out}/reviewed"
+
+  # Split before converting, so the split is over the neutral model rather
+  # than over YOLO's directory layout.
+  - name: split
+    op: dataset.split
+    with:
+      folder: "${out}/reviewed"
+      output: "${out}/split"
+      ratios: "0.8,0.1,0.1"
+      names: "train,val,test"
+      seed: "${seed}"
+
+  # A near-duplicate in both train and val makes the model look better than it
+  # is, and that is exactly the number the loop is trying to trust.
+  - name: check for leakage
+    op: inspect.leakage
+    with:
+      folder: "${out}/split"
+      method: phash
+      threshold: 6
+
+  - name: convert to yolo
+    op: convert.dataset
+    with:
+      folder: "${out}/split"
+      output: "${out}/yolo"
+      to: yolo
+
+  - name: resize
+    op: image.resize
+    with:
+      folder: "${out}/yolo"
+      output: "${out}/yolo-${size}"
+      width: "${size}"
+      height: "${size}"
+      mode: letterbox
+
+  # Train only. Augmenting validation measures the augmentation, not the model.
+  - name: augment the training split
+    op: augment.dataset
+    with:
+      folder: "${out}/yolo-${size}"
+      output: "${out}/final"
+      splits: "train"
+      multiplier: 2
+      flip_horizontal: true
+      flip_vertical: false
+      rotate: 8.0
+      brightness: 0.2
+      contrast: 0.15
+      seed: "${seed}"
+
+  # Keep this. Comparing it against the previous turn's report is how you see
+  # whether the loop is actually working.
+  - name: report
+    op: report.html
+    with:
+      folder: "${out}/final"
+      output: "${out}/round-report.html"
+      title: "Model loop — this round"

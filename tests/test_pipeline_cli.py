@@ -275,3 +275,40 @@ class TestCommandLine:
         assert code == 0
         # recursive defaults to True for labels.list; --no-recursive turns it off.
         assert json.loads(text)["counts"]["label_files"] == 0
+
+
+class TestShippedRecipes:
+    """Every recipe in recipes/ must still bind against the current operations.
+
+    Recipes go stale silently: rename a parameter and the YAML in the repo is
+    wrong from that commit until somebody runs it. This is the cheapest
+    possible guard -- it caught `inspect.classes`, an operation that never
+    existed, on the day it was written.
+    """
+
+    def _recipes(self):
+        from pathlib import Path
+
+        folder = Path(__file__).resolve().parent.parent / "recipes"
+        found = sorted(folder.glob("*.yaml"))
+        assert found, "no recipes found to check"
+        return found
+
+    def test_every_recipe_names_a_real_operation(self):
+        from data_factory.core import registry
+        from data_factory.pipeline import Recipe
+
+        known = {op.name for op in registry.all_operations()}
+        for path in self._recipes():
+            recipe = Recipe.load(path)
+            for step in recipe.steps:
+                assert step.op in known, f"{path.name}: unknown operation {step.op}"
+
+    def test_the_model_loop_recipe_exports_reviewed_only(self):
+        """The safeguard the whole loop rests on. If this default ever flips,
+        the recipe starts feeding a model its own unreviewed guesses."""
+        from data_factory.pipeline import Recipe
+
+        recipe = Recipe.load(self._recipes()[0].parent / "model_loop.yaml")
+        export = next(s for s in recipe.steps if s.op == "annotate.export")
+        assert export.params["states"] == "reviewed"

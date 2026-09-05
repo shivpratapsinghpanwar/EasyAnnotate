@@ -29,6 +29,12 @@ CONVERT_PARAMS = (
         default="auto",
         choices=FORMAT_CHOICES,
     ),
+    Param(
+        "classes",
+        "strs",
+        "Explicit class order, e.g. 'Closed,Open'. Fixes YOLO indices in place.",
+        default=None,
+    ),
     Param("recursive", "bool", "Include sub-folders.", default=True),
     Param("copy_images", "bool", "Copy the image files alongside the labels.", default=True),
     Param(
@@ -59,7 +65,14 @@ CONVERT_PARAMS = (
         "  * CSV cannot hold outlines, so converting a segmentation dataset to\n"
         "    csv is lossy -- it warns rather than dropping them silently.\n"
         "  * Splits are preserved when the source layout names them (a train/\n"
-        "    sub-folder, or instances_val.json)."
+        "    sub-folder, or instances_val.json).\n"
+        "\n"
+        "About 'classes'. Without it, the YOLO class order is derived by sorting\n"
+        "the names found in *this* folder. That is reproducible but not stable:\n"
+        "add a class next month and every index at or after it shifts, so the\n"
+        ".txt files you exported earlier quietly start meaning something else.\n"
+        "Pass the same 'classes' list on every export and the indices hold. Any\n"
+        "class found but not listed is appended at the end, never inserted."
     ),
 )
 def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
@@ -84,6 +97,29 @@ def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
     if output.resolve() == folder.resolve():
         result.fail("output must differ from folder -- converting in place would overwrite the source")
         return result
+
+    # An explicit class order pins the YOLO indices. Applied after reading so
+    # it overrides a data.yaml too: the caller's declared order wins over
+    # whatever the source folder happened to carry.
+    declared: list[str] | None = params.get("classes")
+    if declared:
+        order = [name.strip() for name in declared if name.strip()]
+        found = {label for item in dataset.items for label in item.annotation.label_set}
+        unlisted = sorted(found - set(order))
+        if unlisted:
+            result.warnings.append(
+                f"{len(unlisted)} class(es) present but not in 'classes' were appended "
+                f"after the declared order: {', '.join(unlisted)}"
+            )
+        unused = [name for name in order if name not in found]
+        if unused:
+            # Keeping them is the point -- a class with no objects this month
+            # still has to hold its index for the files exported last month.
+            result.warnings.append(
+                f"{len(unused)} declared class(es) have no objects here but keep "
+                f"their index: {', '.join(unused)}"
+            )
+        dataset.classes = order + unlisted
 
     stats = dataset.stats()
     total = len(dataset.items)

@@ -66,8 +66,14 @@ machines a backend runs on. Only `collect.webcam`'s preview needs a GUI, and it
 falls back to timer capture with a warning. For the preview:
 `pip install "data-factory[gui]"`.
 
-Optional extras: `web` (FastAPI service), `gui` (preview window), `sam`
-(SAM-assisted segmentation), `dev` (tests and linting).
+Optional extras: `web` (FastAPI service), `gui` (preview window), `dev` (tests
+and linting).
+
+There is deliberately no `sam` extra. Model-backed tools run in a **separate
+process with their own interpreter**, discovered at runtime and absent without
+complaint — so torch's version matrix never has to agree with this package's.
+Point `DATAFACTORY_TOOLS_MODULE` at one to enable it; with none installed,
+`GET /api/tools` returns an empty list and the editor is fully usable.
 
 ---
 
@@ -107,6 +113,131 @@ datafactory serve                 # opens http://localhost:8765
 Drop in a zip, it detects the format, and every operation appears as a form
 generated from the same declaration the CLI reads. Binds to `127.0.0.1` only.
 The same code hosts the service — see [DEPLOYING.md](DEPLOYING.md).
+
+---
+
+## Annotating
+
+`datafactory serve`, drop in a folder, click **Start annotating**. That is the
+whole setup. There is no organisation to create, no project template, no task,
+no label schema — **a class is created by drawing a box and typing its name.**
+
+```
+drag              draw a box in the current class
+P                 polygon: click points, Enter or double-click to close
+1–0               pick a class — or re-class what is selected
+Alt+click         on a vertex: delete it. On an edge midpoint: insert one
+Ctrl+D            copy the previous image's shapes (worth more than a model on video)
+R                 mark reviewed and move on
+S                 skip — "I can't tell". Never exported
+?                 every shortcut
+```
+
+There is **no Save button**: edits are saved 400ms after you stop and before
+you navigate. Reopening a project **resumes on the first unfinished image**, not
+at the beginning.
+
+Existing work comes with you. Promoting an upload imports its VOC, YOLO, COCO
+or LabelMe annotations, and if it carried a `data.yaml` the class order in it is
+**adopted rather than recomputed** — those indices are already baked into label
+files that exist in the world.
+
+Export goes back through an ordinary operation, so it has a dry run, progress
+and recipe support like everything else:
+
+```bash
+datafactory annotate.export --database ~/.datafactory/annotations.db \
+    --project <id> --output ./train-set --to yolo
+```
+
+It exports **reviewed images only** unless told otherwise. Feeding a model's own
+unreviewed predictions back in as ground truth is how a model poisons itself,
+and nothing about the output looks wrong when it happens.
+
+### Annotating a folder in place
+
+```bash
+datafactory annotate ./my-dataset
+```
+
+No copy is made. The folder's own label files are **updated as you draw** —
+VOC `.xml`, LabelMe `.json` or YOLO `.txt`, whichever the folder already uses,
+detected on open. A YOLO folder's `data.yaml` is kept in step, and its existing
+class order is inherited rather than recomputed.
+
+Writes are atomic, so a save landing while something else reads the folder
+cannot produce a truncated label file. COCO and CSV keep one file for the whole
+dataset, so those open read-only for write-back — it says so, and
+`annotate.export` produces the updated dataset instead.
+
+This mode is CLI-only by design: it takes a path, and no HTTP route is ever
+allowed to.
+
+### The model loop
+
+Annotate a few hundred by hand → train → run inference → **load the predictions
+back in** → fix the wrong ones → export → retrain.
+
+Load a zip of YOLO `.txt` (with `--save-conf`), VOC, LabelMe, or a COCO json —
+including the **detection-results form**, the bare JSON list that torchvision,
+mmdetection and Ultralytics evaluation scripts actually emit.
+
+Predictions render dashed, and fade with confidence. A slider hides the weak
+ones without deleting them. `A` accepts everything visible, marks the image
+reviewed and moves on — a thousand images in about fifteen minutes when the
+model is mostly right.
+
+The import always reports what **didn't** match. Predictions pair with images by
+filename stem, and silently importing zero shapes because `img_001.txt` met
+`IMG_001.jpg` looks exactly like a model that predicted nothing.
+
+**Model agreement** is the number to watch: it tells you when to retrain and
+when to stop. It counts only predictions on images a person has actually
+reviewed — otherwise importing a fresh run would make the model look better —
+and it counts deletions, because deleting a false positive is the commonest
+correction there is and ignoring it would score a model that hallucinates boxes
+at 100%.
+
+One turn of the loop is written down as a recipe:
+
+```bash
+datafactory run recipes/model_loop.yaml --set project=<id> --set out=./round-2
+```
+
+Export reviewed → check classes and health → split → check leakage → convert →
+resize → augment train only → report. Compare this round's report against the
+last one to see whether the loop is actually working.
+
+### Model-assisted shapes
+
+Segmentation models can propose an outline; the editor shows a button for one
+only when a tool is installed **and** healthy, so there are never dead controls.
+With nothing installed, `GET /api/tools` returns an empty list and everything
+else works — that is the default and it is a tested state.
+
+Heavy models run in a **separate process**. A CUDA out-of-memory or a native
+segfault kills that process, the tool goes unavailable, and you carry on drawing
+boxes. Turning a mask into an editable outline is done here, not there: contours,
+Douglas-Peucker simplification, then a hard vertex cap. A 512×512 mask has a
+boundary thousands of pixels long, and nobody edits a two-thousand-vertex
+polygon — which is exactly what the script this replaces used to write.
+
+### Class indices do not move
+
+A YOLO label file stores a class *index*, never a name, so the index-to-name
+table is external state that every exported `.txt` silently depends on. Deriving
+it by sorting the names present at export time means adding one class shifts
+every index at or after it:
+
+```
+Monday    [Closed, Open]           a file reading `1` means Open
+Friday    [Closed, Handle, Open]   the same file now means Handle
+```
+
+Nothing errors. The files still parse. A project's label table allocates an
+index once and never moves it: renaming keeps the index, retiring keeps the
+slot, a new class is appended. For datasets without a project, pass the same
+`--classes` list to `convert.dataset` on every export and the indices hold.
 
 ---
 
@@ -408,8 +539,13 @@ not batch operations.
 ## Tests
 
 ```bash
-uv run pytest          # 326 tests
+uv run pytest          # 621 tests
 ```
+
+Ten of those drive the annotation editor in a real browser and are skipped
+unless Playwright is installed (`pip install playwright && playwright install
+chromium`). A canvas tool with no automated test is one that quietly stops
+working.
 
 Fixtures build a small dataset carrying every defect the real one had: case
 variant classes, both polygon dialects, a hard negative, an exact duplicate,

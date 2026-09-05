@@ -177,6 +177,11 @@ class Operation:
     #: Given bound parameters, return True when this particular run changes
     #: nothing -- ``--action report`` on an otherwise destructive operation, say.
     safe_when: Callable[[dict[str, Any]], bool] | None = None
+    #: Keep this operation out of the web form list while leaving it in
+    #: ``datafactory list`` and in recipes. For operations whose real inputs
+    #: are not a folder the browser can name -- an annotation project, say --
+    #: so rendering a form for them would only invite a refused request.
+    hidden_from_web: bool = False
 
     def destructive_for(self, params: dict[str, Any]) -> bool:
         """Whether *this* invocation, with these parameters, writes anything."""
@@ -281,6 +286,7 @@ def operation(
     destructive: bool = False,
     notes: str = "",
     safe_when: Callable[[dict[str, Any]], bool] | None = None,
+    hidden_from_web: bool = False,
 ) -> Callable[[OpFunc], OpFunc]:
     """Decorator registering a function as a Data Factory operation."""
 
@@ -297,6 +303,7 @@ def operation(
             destructive=destructive,
             notes=notes,
             safe_when=safe_when,
+            hidden_from_web=hidden_from_web,
         )
         return func
 

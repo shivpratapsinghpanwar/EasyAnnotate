@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 #: Where Ultralytics expects things. ``images/x.jpg`` <-> ``labels/x.txt``.
@@ -87,12 +88,24 @@ def read(
         label = classes.name_for(class_id)
         if len(values) == 4:
             shapes.append(_box_shape(label, values, width, height))
+        elif len(values) == 5:
+            # `cls cx cy w h conf` -- what `--save-conf` writes, and therefore
+            # what comes back from a real inference run. Rejecting it meant the
+            # one file people most want to load was the one that would not
+            # parse. Five values are unambiguous: a polygon needs at least six
+            # and an even number of them.
+            shapes.append(_box_shape(label, values[:4], width, height, confidence=values[4]))
         elif len(values) >= 6 and len(values) % 2 == 0:
             shapes.append(_polygon_shape(label, values, width, height))
+        elif len(values) >= 7 and len(values) % 2 == 1:
+            # A segmentation line with a trailing confidence.
+            shapes.append(
+                _polygon_shape(label, values[:-1], width, height, confidence=values[-1])
+            )
         else:
             raise AnnotationError(
-                f"{path.name}:{number}: expected 4 box values or an even number "
-                f"of >= 6 polygon values, got {len(values)}"
+                f"{path.name}:{number}: expected 4 box values (optionally plus a "
+                f"confidence) or an even number of >= 6 polygon values, got {len(values)}"
             )
 
     return Annotation(
@@ -104,7 +117,14 @@ def read(
     )
 
 
-def _box_shape(label: str, values: Sequence[float], width: int, height: int) -> Shape:
+def _box_shape(
+    label: str,
+    values: Sequence[float],
+    width: int,
+    height: int,
+    *,
+    confidence: float | None = None,
+) -> Shape:
     cx, cy, bw, bh = values
     half_w, half_h = bw * width / 2.0, bh * height / 2.0
     centre_x, centre_y = cx * width, cy * height
@@ -116,17 +136,30 @@ def _box_shape(label: str, values: Sequence[float], width: int, height: int) -> 
             int(round(centre_x + half_w)),
             int(round(centre_y + half_h)),
         ),
+        confidence=confidence,
     )
 
 
-def _polygon_shape(label: str, values: Sequence[float], width: int, height: int) -> Shape:
+def _polygon_shape(
+    label: str,
+    values: Sequence[float],
+    width: int,
+    height: int,
+    *,
+    confidence: float | None = None,
+) -> Shape:
     polygon: list[Point] = [
         (int(round(values[i] * width)), int(round(values[i + 1] * height)))
         for i in range(0, len(values), 2)
     ]
     xs = [p[0] for p in polygon]
     ys = [p[1] for p in polygon]
-    return Shape(label=label, bbox=(min(xs), min(ys), max(xs), max(ys)), polygon=polygon)
+    return Shape(
+        label=label,
+        bbox=(min(xs), min(ys), max(xs), max(ys)),
+        polygon=polygon,
+        confidence=confidence,
+    )
 
 
 def write(
@@ -163,9 +196,7 @@ def write(
                 continue
             lines.append(f"{class_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
-    return path
+    return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""))
 
 
 def _unit(value: float) -> float:
@@ -195,9 +226,7 @@ def write_data_yaml(
     lines.append("names:")
     for index, name in enumerate(classes.names):
         lines.append(f"  {index}: {name}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-    return path
+    return write_text_atomic(path, "\n".join(lines) + "\n")
 
 
 def read_data_yaml(path: Path) -> tuple[ClassList, dict[str, str]]:

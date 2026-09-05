@@ -17,6 +17,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 #: Shape types we can faithfully represent as a bbox and optional polygon.
@@ -131,6 +132,5 @@ def write(annotation: Annotation, path: Path, *, image_path: str | None = None) 
         "imageHeight": annotation.height,
         "imageWidth": annotation.width,
     }
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(document, indent=2), encoding="utf-8")
+    write_text_atomic(path, json.dumps(document, indent=2))
     return path

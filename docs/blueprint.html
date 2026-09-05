@@ -1,0 +1,690 @@
+<title>Data Factory Blueprint</title>
+<style>
+  :root {
+    --paper:     #EDF0F4;
+    --surface:   #FFFFFF;
+    --sunk:      #E1E7EE;
+    --ink:       #121924;
+    --ink-2:     #414E5F;
+    --ink-3:     #6B7A8D;
+    --rule:      #CBD5E0;
+    --rule-firm: #9AAABC;
+    --accent:    #2F5FE0;
+    --accent-lo: #DDE6FB;
+    --signal:    #BE4230;
+    --ok:        #1C7A52;
+
+    --sans: "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+
+    --s0: .75rem; --s1: .8125rem; --s2: .9375rem; --s3: 1.0625rem;
+    --s4: 1.375rem; --s5: 2rem; --s6: 2.75rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:     #0E1218;
+      --surface:   #161C25;
+      --sunk:      #1E2630;
+      --ink:       #E4EAF2;
+      --ink-2:     #A6B3C4;
+      --ink-3:     #758395;
+      --rule:      #262F3B;
+      --rule-firm: #3B4757;
+      --accent:    #7CA2FF;
+      --accent-lo: #17223A;
+      --signal:    #F08877;
+      --ok:        #56C08C;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:     #0E1218;
+    --surface:   #161C25;
+    --sunk:      #1E2630;
+    --ink:       #E4EAF2;
+    --ink-2:     #A6B3C4;
+    --ink-3:     #758395;
+    --rule:      #262F3B;
+    --rule-firm: #3B4757;
+    --accent:    #7CA2FF;
+    --accent-lo: #17223A;
+    --signal:    #F08877;
+    --ok:        #56C08C;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font-family: var(--sans); font-size: var(--s2); line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .page { max-width: 1120px; margin: 0 auto; padding: 0 clamp(1rem,4vw,2.5rem) 5rem; }
+
+  header.top { padding: clamp(2.5rem,7vw,4.5rem) 0 1.5rem; }
+  .kicker {
+    font-family: var(--mono); font-size: var(--s0); letter-spacing: .16em;
+    text-transform: uppercase; color: var(--accent); margin: 0 0 .9rem;
+  }
+  h1 {
+    font-weight: 700; font-size: clamp(1.85rem,4.4vw,var(--s6));
+    line-height: 1.06; letter-spacing: -.03em; text-wrap: balance;
+    margin: 0 0 1rem; max-width: 18ch;
+  }
+  .dek { font-size: var(--s3); color: var(--ink-2); max-width: 62ch; margin: 0; }
+  .dek b { color: var(--ink); font-weight: 620; }
+
+  .figures {
+    display: grid; grid-template-columns: repeat(auto-fit,minmax(96px,1fr));
+    gap: 1px; background: var(--rule); border-block: 1px solid var(--rule);
+    margin: 2.25rem 0 0;
+  }
+  .fg { background: var(--paper); padding: .95rem .3rem 1.05rem; }
+  .fg dt {
+    font-family: var(--mono); font-size: .6875rem; letter-spacing: .1em;
+    text-transform: uppercase; color: var(--ink-3); margin: 0 0 .3rem;
+  }
+  .fg dd {
+    font-family: var(--mono); font-size: var(--s4); font-weight: 600;
+    font-variant-numeric: tabular-nums; margin: 0; line-height: 1;
+  }
+
+  section { padding-top: 3.25rem; }
+  section > p, section > ul, section > .note, section > h3 { max-width: 70ch; }
+  h2 {
+    font-weight: 700; font-size: var(--s5); letter-spacing: -.025em;
+    line-height: 1.15; text-wrap: balance; margin: 0 0 .35rem;
+  }
+  h2 .eyebrow {
+    display: block; font-family: var(--mono); font-size: .6875rem;
+    letter-spacing: .15em; text-transform: uppercase; color: var(--accent);
+    margin-bottom: .55rem; font-weight: 500;
+  }
+  h3 { font-size: var(--s2); font-weight: 650; margin: 1.9rem 0 .35rem; letter-spacing: -.005em; }
+  p { margin: 0 0 1rem; }
+  .lede { font-size: var(--s3); color: var(--ink-2); margin-bottom: 1.3rem; }
+  code {
+    font-family: var(--mono); font-size: .87em; background: var(--sunk);
+    padding: .1em .36em; border-radius: 3px;
+  }
+  a { color: var(--accent); }
+
+  figure { margin: 1.5rem 0 1.9rem; }
+  figure svg {
+    display: block; width: 100%; max-width: 100%; height: auto;
+    color: var(--ink-2); background: var(--surface);
+    border: 1px solid var(--rule); border-radius: 4px;
+  }
+  figcaption {
+    font-family: var(--mono); font-size: var(--s0); line-height: 1.55;
+    color: var(--ink-3); margin-top: .6rem; max-width: 78ch;
+  }
+  figcaption b { color: var(--ink-2); font-weight: 620; }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: .35rem 1.5rem; margin: 0 0 1.5rem;
+    font-family: var(--mono); font-size: var(--s0); color: var(--ink-3);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: .45rem; }
+  .swatch { width: 26px; height: 0; border-top: 2px solid currentColor; }
+  .swatch.built { color: var(--ok); }
+  .swatch.planned { color: var(--ink-3); border-top-style: dashed; }
+
+  .scroll { overflow-x: auto; margin: 0 0 1.2rem; }
+  table {
+    border-collapse: collapse; width: 100%; min-width: 460px;
+    font-family: var(--mono); font-size: var(--s1);
+  }
+  th, td {
+    text-align: left; padding: .5rem 1rem .5rem 0;
+    border-bottom: 1px solid var(--rule); vertical-align: top;
+  }
+  th {
+    font-weight: 600; color: var(--ink-3); font-size: .6875rem;
+    letter-spacing: .1em; text-transform: uppercase; border-bottom-color: var(--rule-firm);
+  }
+  td:first-child { color: var(--ink); padding-right: 1.5rem; }
+  td.n, th.n { text-align: right; font-variant-numeric: tabular-nums; padding-right: 0; }
+  td.gain { color: var(--accent); font-weight: 620; }
+
+  .note {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-left: 2px solid var(--rule-firm); border-radius: 0 4px 4px 0;
+    padding: .9rem 1.1rem; margin: 0 0 1.1rem;
+  }
+  .note.why { border-left-color: var(--accent); }
+  .note.risk { border-left-color: var(--signal); }
+  .note p:last-child { margin-bottom: 0; }
+  .note .tag {
+    display: block; font-family: var(--mono); font-size: .6875rem;
+    letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin-bottom: .4rem;
+  }
+
+  footer {
+    margin-top: 3.5rem; padding-top: 1rem; border-top: 1px solid var(--rule);
+    font-family: var(--mono); font-size: var(--s0); color: var(--ink-3);
+  }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+</style>
+
+<div class="page">
+
+<header class="top">
+  <p class="kicker">Data Factory &middot; blueprint</p>
+  <h1>What is built, and how the data moves</h1>
+  <p class="dek">The batch engine and its four interfaces are <b>done and tested</b>. The annotation
+    editor is <b>designed and de-risked, not built</b>. This is the current shape of the system,
+    drawn rather than described &mdash; and it marks the line between the two.</p>
+</header>
+
+<dl class="figures">
+  <div class="fg"><dt>Operations</dt><dd>27</dd></div>
+  <div class="fg"><dt>Formats</dt><dd>5</dd></div>
+  <div class="fg"><dt>Interfaces</dt><dd>4</dd></div>
+  <div class="fg"><dt>Modules</dt><dd>54</dd></div>
+  <div class="fg"><dt>Package</dt><dd>9.6k</dd></div>
+  <div class="fg"><dt>Tests</dt><dd>433</dd></div>
+</dl>
+
+<!-- ================================================================= -->
+<section id="system">
+  <h2><span class="eyebrow">The system today</span>One core, four ways in</h2>
+
+  <p class="lede">Every interface is an adapter over the same pure core. The count that matters is
+    zero: the number of times <code>core/</code> imports anything from an interface.</p>
+
+  <div class="legend">
+    <span><i class="swatch built"></i> built and tested</span>
+    <span><i class="swatch planned"></i> designed, not built</span>
+  </div>
+
+  <figure>
+    <svg viewBox="0 0 960 400" role="img" aria-label="Four interfaces — command line, interactive menu, YAML recipes and the HTTP service with its browser UI — all call into a single bind and validate step, which calls the pure core. The core alone touches the filesystem. A heavy-tool sidecar sits outside the core, reached over a pipe, and is optional. The annotation store and editor are drawn dashed because they are designed but not built.">
+      <defs>
+        <marker id="b1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="b1a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2F5FE0"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="12">
+
+        <text x="24" y="26" font-size="10" letter-spacing="1.5" fill="currentColor" opacity=".55">INTERFACES</text>
+        <rect x="24" y="38" width="150" height="34" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="38" y="60" fill="currentColor">command line</text>
+        <rect x="196" y="38" width="150" height="34" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="210" y="60" fill="currentColor">menu</text>
+        <rect x="368" y="38" width="150" height="34" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="382" y="60" fill="currentColor">YAML recipes</text>
+        <rect x="540" y="38" width="196" height="34" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="554" y="60" fill="currentColor">HTTP + browser UI</text>
+
+        <path d="M 99 74 L 460 108"  stroke="currentColor" fill="none" opacity=".45" marker-end="url(#b1)"/>
+        <path d="M 271 74 L 470 108" stroke="currentColor" fill="none" opacity=".45" marker-end="url(#b1)"/>
+        <path d="M 443 74 L 480 108" stroke="currentColor" fill="none" opacity=".45" marker-end="url(#b1)"/>
+        <path d="M 638 74 L 500 108" stroke="currentColor" fill="none" opacity=".45" marker-end="url(#b1)"/>
+
+        <rect x="378" y="114" width="204" height="46" rx="3" fill="none" stroke="#2F5FE0" stroke-width="2"/>
+        <text x="392" y="136" fill="#2F5FE0">registry.bind()</text>
+        <text x="392" y="152" font-size="10" fill="currentColor" opacity=".7">one validation path</text>
+
+        <path d="M 480 162 L 480 196" stroke="#2F5FE0" fill="none" marker-end="url(#b1a)"/>
+        <text x="492" y="184" font-size="10" fill="currentColor" opacity=".7">params + Context</text>
+
+        <text x="24" y="214" font-size="10" letter-spacing="1.5" fill="currentColor" opacity=".55">PURE CORE &mdash; no printing, no argparse, no interface imports</text>
+        <rect x="24" y="224" width="712" height="88" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" opacity=".8"/>
+        <text x="40" y="248" fill="currentColor">27 operations</text>
+        <text x="40" y="268" font-size="10.5" fill="currentColor" opacity=".75">registry &middot; pairs &middot; imaging &middot; writer &middot; stats &middot; parallel &middot; provenance</text>
+        <text x="40" y="288" font-size="10.5" fill="currentColor" opacity=".75">annotations: voc &middot; yolo &middot; coco &middot; labelme &middot; csv</text>
+        <text x="40" y="305" font-size="10" fill="#2F5FE0">7,193 lines &mdash; the whole product lives here</text>
+
+        <path d="M 380 312 L 380 344" stroke="currentColor" fill="none" opacity=".5" marker-end="url(#b1)"/>
+        <text x="392" y="332" font-size="10" fill="currentColor" opacity=".7">fs.perform() &mdash; the only writer</text>
+
+        <rect x="256" y="350" width="248" height="32" rx="3" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".65"/>
+        <text x="270" y="371" fill="currentColor">the filesystem</text>
+
+        <text x="776" y="26" font-size="10" letter-spacing="1.5" fill="currentColor" opacity=".55">OPTIONAL</text>
+        <rect x="776" y="224" width="160" height="88" rx="3" fill="none" stroke="currentColor"
+              stroke-width="1.4" stroke-dasharray="6 4" opacity=".75"/>
+        <text x="790" y="250" fill="currentColor">heavy tools</text>
+        <text x="790" y="268" font-size="10" fill="currentColor" opacity=".7">separate process</text>
+        <text x="790" y="284" font-size="10" fill="currentColor" opacity=".7">torch stays here</text>
+        <text x="790" y="302" font-size="10" fill="#1C7A52">protocol built</text>
+        <path d="M 736 268 L 770 268" stroke="currentColor" fill="none" opacity=".5"
+              stroke-dasharray="5 4" marker-end="url(#b1)"/>
+        <text x="738" y="258" font-size="9.5" fill="currentColor" opacity=".65">pipe</text>
+
+        <rect x="776" y="114" width="160" height="46" rx="3" fill="none" stroke="currentColor"
+              stroke-width="1.4" stroke-dasharray="6 4" opacity=".6"/>
+        <text x="790" y="136" fill="currentColor" opacity=".85">annotation store</text>
+        <text x="790" y="152" font-size="10" fill="currentColor" opacity=".6">+ canvas editor</text>
+      </g>
+    </svg>
+    <figcaption><b>Four interfaces, one validation path, one core.</b> A bad threshold is rejected
+      identically whether it arrives from a typed command, a YAML file or a POST body. The core
+      grew from 14 operations to 27 and from one format to five without an interface being
+      edited &mdash; that is the property this shape buys.</figcaption>
+  </figure>
+
+  <div class="note why">
+    <span class="tag">Why it is drawn this way</span>
+    <p>The arrows point one direction only. If the core could import the CLI, the same logic could
+      not also back an HTTP endpoint, and the browser editor being planned would need its own copy
+      of everything.</p>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="formats">
+  <h2><span class="eyebrow">Interchange</span>Five formats meet in the middle</h2>
+
+  <p class="lede">Readers parse into one neutral model; writers serialise out of it. That is why the
+    count is ten pieces rather than twenty converters.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 250" role="img" aria-label="Five annotation formats — Pascal VOC, YOLO, COCO, LabelMe and CSV — are read into a single neutral Shape and Annotation model in the middle, and written back out to any of the same five. A pairwise design would need twenty converters instead of ten readers and writers.">
+      <defs>
+        <marker id="b2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="11.5">
+        <text x="24" y="24" font-size="10" letter-spacing="1.4" fill="currentColor" opacity=".55">READ</text>
+        <text x="800" y="24" font-size="10" letter-spacing="1.4" fill="currentColor" opacity=".55">WRITE</text>
+
+        <g fill="currentColor">
+          <text x="24" y="60">Pascal VOC</text>
+          <text x="24" y="94">YOLO</text>
+          <text x="24" y="128">COCO</text>
+          <text x="24" y="162">LabelMe</text>
+          <text x="24" y="196">CSV</text>
+        </g>
+        <path d="M 130 56 L 336 112" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 130 90 L 336 118" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 130 124 L 336 124" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 130 158 L 336 130" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 130 192 L 336 136" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+
+        <rect x="344" y="88" width="212" height="76" rx="3" fill="none" stroke="#2F5FE0" stroke-width="2"/>
+        <text x="360" y="112" fill="#2F5FE0">Shape / Annotation</text>
+        <text x="360" y="130" font-size="10" fill="currentColor" opacity=".75">bbox + polygon + flags</text>
+        <text x="360" y="147" font-size="10" fill="currentColor" opacity=".75">+ confidence</text>
+
+        <path d="M 564 112 L 764 56"  stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 564 118 L 764 90"  stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 564 124 L 764 124" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 564 130 L 764 158" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+        <path d="M 564 136 L 764 192" stroke="currentColor" fill="none" opacity=".4" marker-end="url(#b2)"/>
+
+        <g fill="currentColor" text-anchor="end">
+          <text x="876" y="60">Pascal VOC</text>
+          <text x="876" y="94">YOLO</text>
+          <text x="876" y="128">COCO</text>
+          <text x="876" y="162">LabelMe</text>
+          <text x="876" y="196">CSV</text>
+        </g>
+
+        <text x="344" y="228" font-size="10.5" fill="currentColor" opacity=".7">
+          10 pieces, not 20 converters &mdash; a sixth format costs one reader and one writer
+        </text>
+      </g>
+    </svg>
+    <figcaption><b>The hub is what makes format support additive.</b> Verified against
+      <code>pycocotools</code>: our COCO export loads in the reference reader, its polygons decode
+      to non-empty masks, and COCOeval scores ground truth against itself at mAP 1.000.
+      Conversions that cannot be lossless say so &mdash; CSV holds no outline, and COCO run-length
+      masks keep their boxes with a warning rather than being silently flattened.</figcaption>
+  </figure>
+</section>
+
+<!-- ================================================================= -->
+<section id="pipeline">
+  <h2><span class="eyebrow">The data pipeline</span>Order is not a style choice</h2>
+
+  <p class="lede">A recipe is a list of steps in a YAML file. Most of the sequence below is forced:
+    get it wrong and the dataset is quietly damaged rather than visibly broken.</p>
+
+  <figure>
+    <svg viewBox="0 0 960 330" role="img" aria-label="The training preparation pipeline in nine steps: auto-orient, fold class case, de-duplicate, split, check leakage, convert, resize, augment the training split only, and report. Three ordering constraints are marked: class case must be folded before the split, de-duplication must happen before the split, and resizing must happen before augmenting. The leakage check verifies the two constraints that precede the split.">
+      <defs>
+        <marker id="b3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="b3s" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#BE4230"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="11">
+
+        <rect x="20" y="96" width="92" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="30" y="118" fill="currentColor" font-size="10.5">a folder</text>
+        <text x="30" y="134" font-size="9.5" fill="currentColor" opacity=".65">any format</text>
+
+        <path d="M 112 122 L 140 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+
+        <g>
+          <rect x="140" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="150" y="116" fill="currentColor" font-size="10.5">1 orient</text>
+          <text x="150" y="132" font-size="9" fill="currentColor" opacity=".65">EXIF baked</text>
+
+          <rect x="252" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="262" y="116" fill="currentColor" font-size="10.5">2 fold case</text>
+          <text x="262" y="132" font-size="9" fill="currentColor" opacity=".65">Open = open</text>
+
+          <rect x="364" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="374" y="116" fill="currentColor" font-size="10.5">3 dedup</text>
+          <text x="374" y="132" font-size="9" fill="currentColor" opacity=".65">perceptual</text>
+
+          <rect x="476" y="96" width="96" height="52" rx="3" fill="none" stroke="#2F5FE0" stroke-width="2"/>
+          <text x="486" y="116" fill="#2F5FE0" font-size="10.5">4 split</text>
+          <text x="486" y="132" font-size="9" fill="currentColor" opacity=".65">stratified</text>
+
+          <rect x="588" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="598" y="116" fill="currentColor" font-size="10.5">5 leakage</text>
+          <text x="598" y="132" font-size="9" fill="currentColor" opacity=".65">must be 0</text>
+
+          <rect x="700" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="710" y="116" fill="currentColor" font-size="10.5">6 convert</text>
+          <text x="710" y="132" font-size="9" fill="currentColor" opacity=".65">to YOLO</text>
+
+          <rect x="812" y="96" width="96" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+          <text x="822" y="116" fill="currentColor" font-size="10.5">7 resize</text>
+          <text x="822" y="132" font-size="9" fill="currentColor" opacity=".65">letterbox</text>
+        </g>
+
+        <path d="M 236 122 L 250 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <path d="M 348 122 L 362 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <path d="M 460 122 L 474 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <path d="M 572 122 L 586 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <path d="M 684 122 L 698 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <path d="M 796 122 L 810 122" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+
+        <path d="M 860 148 L 860 196 L 476 196" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+
+        <rect x="364" y="200" width="112" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="374" y="220" fill="currentColor" font-size="10.5">8 augment</text>
+        <text x="374" y="236" font-size="9" fill="currentColor" opacity=".65">train split only</text>
+
+        <path d="M 364 226 L 300 226" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b3)"/>
+        <rect x="188" y="200" width="112" height="52" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="198" y="220" fill="currentColor" font-size="10.5">9 report</text>
+        <text x="198" y="236" font-size="9" fill="currentColor" opacity=".65">one html file</text>
+
+        <g stroke="#BE4230" fill="none" stroke-dasharray="5 3" opacity=".95">
+          <path d="M 300 90 L 300 66 L 524 66 L 524 90" marker-end="url(#b3s)"/>
+          <path d="M 412 90 L 412 44 L 524 44 L 524 90" marker-end="url(#b3s)"/>
+        </g>
+        <text x="308" y="60" font-size="9.5" fill="#BE4230">before the split &mdash; or each split inherits the damage</text>
+        <text x="420" y="38" font-size="9.5" fill="#BE4230">before the split &mdash; or the duplicate is dealt into both sides</text>
+
+        <path d="M 636 148 L 636 172" stroke="#BE4230" fill="none" opacity=".8"/>
+        <text x="646" y="170" font-size="9.5" fill="#BE4230">verifies steps 2&ndash;4 worked</text>
+
+        <text x="490" y="278" font-size="9.5" fill="currentColor" opacity=".7">
+          resize before augment, so augmentation works at the size the model will actually see
+        </text>
+        <text x="490" y="296" font-size="9.5" fill="currentColor" opacity=".7">
+          augment train only &mdash; augmenting validation measures the augmentation, and flatters it
+        </text>
+      </g>
+    </svg>
+    <figcaption><b>Three of the eight orderings are load-bearing.</b> Class case and
+      de-duplication must precede the split, because fixing either afterwards leaves the damage
+      already distributed across train and validation. The leakage check exists to prove those two
+      actually happened.</figcaption>
+  </figure>
+
+  <h3>Run on the real door dataset</h3>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Step</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>fold class case</td><td>1,145 objects renamed &mdash; 4 classes became 2</td></tr>
+        <tr><td>split</td><td>2,948 / 369 / 369, stratified and seeded</td></tr>
+        <tr><td>leakage</td><td>0 leaked pairs across 3 splits</td></tr>
+        <tr><td>convert to YOLO</td><td>3,686 images, 3,871 objects, 2 classes</td></tr>
+        <tr><td>resize 640 letterbox</td><td>3,686 resized, 0 objects dropped</td></tr>
+        <tr><td>augment &times;2, train only</td><td>9,582 images, 10,067 objects</td></tr>
+        <tr><td>health of the result</td><td><b>0 errors, 0 warnings, 1 resolution</b></td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="dryrun">
+  <h2><span class="eyebrow">Safety</span>Preview and execution are one path</h2>
+
+  <figure>
+    <svg viewBox="0 0 900 190" role="img" aria-label="An operation builds the same complete list of file actions in both modes. The list then reaches a single perform function, which returns immediately in dry-run mode and touches the disk otherwise. Dry run removes one step; it does not take a different route.">
+      <defs>
+        <marker id="b4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="11.5">
+        <rect x="24" y="64" width="176" height="56" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="38" y="88" fill="currentColor">the operation</text>
+        <text x="38" y="106" font-size="10" fill="currentColor" opacity=".7">decides what to do</text>
+
+        <path d="M 200 92 L 250 92" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b4)"/>
+
+        <rect x="256" y="52" width="204" height="80" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="270" y="76" fill="currentColor">list of FileActions</text>
+        <text x="270" y="94" font-size="10" fill="currentColor" opacity=".7">identical in both modes</text>
+        <text x="270" y="114" font-size="10" fill="#2F5FE0">this is the audit trail</text>
+
+        <path d="M 460 92 L 512 92" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b4)"/>
+
+        <rect x="518" y="52" width="164" height="80" rx="3" fill="none" stroke="#2F5FE0" stroke-width="2"/>
+        <text x="532" y="78" fill="#2F5FE0">fs.perform()</text>
+        <text x="532" y="98" font-size="10" fill="currentColor" opacity=".75">if dry_run: return</text>
+        <text x="532" y="116" font-size="10" fill="currentColor" opacity=".75">else: touch the disk</text>
+
+        <path d="M 682 76 L 760 40" stroke="currentColor" fill="none" opacity=".5" stroke-dasharray="5 4" marker-end="url(#b4)"/>
+        <text x="768" y="38" font-size="10.5" fill="currentColor" opacity=".8">preview &mdash; nothing written</text>
+        <path d="M 682 108 L 760 146" stroke="currentColor" fill="none" opacity=".5" marker-end="url(#b4)"/>
+        <text x="768" y="150" font-size="10.5" fill="currentColor" opacity=".8">the real run</text>
+      </g>
+    </svg>
+    <figcaption><b>Only the last line differs.</b> Operations never call <code>shutil</code>
+      themselves, so there is no second code path that could drift from the first. A preview is a
+      description of the real run, not a prediction of it.</figcaption>
+  </figure>
+</section>
+
+<!-- ================================================================= -->
+<section id="heavy">
+  <h2><span class="eyebrow">Heavy tools</span>Torch lives on the other side of a pipe</h2>
+
+  <p class="lede">The protocol, the client and the registry are built and tested against a fake tool
+    that sleeps instead of loading a model. SAM itself is Phase 3.</p>
+
+  <figure>
+    <svg viewBox="0 0 940 250" role="img" aria-label="The editor calls a tool registry, which speaks newline-delimited JSON over a pipe to a separate process holding PyTorch. If no tool is installed the registry returns an empty list and the editor stays fully usable. If the tool crashes, only the child process dies and the editor greys out one button.">
+      <defs>
+        <marker id="b5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="11.5">
+        <text x="24" y="26" font-size="10" letter-spacing="1.4" fill="currentColor" opacity=".55">OUR PROCESS &mdash; installs in seconds, no torch</text>
+        <rect x="24" y="38" width="404" height="176" rx="3" fill="none" stroke="currentColor" stroke-width="1.3" opacity=".55"/>
+
+        <rect x="48" y="66" width="160" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="6 4"/>
+        <text x="62" y="88" fill="currentColor">editor</text>
+        <text x="62" y="104" font-size="10" fill="currentColor" opacity=".65">Phase 1</text>
+
+        <path d="M 208 89 L 250 89" stroke="currentColor" fill="none" opacity=".5" marker-end="url(#b5)"/>
+
+        <rect x="256" y="66" width="148" height="46" rx="3" fill="none" stroke="#1C7A52" stroke-width="1.6"/>
+        <text x="270" y="88" fill="currentColor">tool registry</text>
+        <text x="270" y="104" font-size="10" fill="#1C7A52">built</text>
+
+        <path d="M 330 112 L 330 152" stroke="currentColor" fill="none" opacity=".5" marker-end="url(#b5)"/>
+        <rect x="216" y="158" width="188" height="40" rx="3" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".7"/>
+        <text x="230" y="176" font-size="10.5" fill="currentColor">nothing installed?</text>
+        <text x="230" y="191" font-size="10" fill="#1C7A52">empty list &mdash; editor still works</text>
+
+        <path d="M 404 89 L 508 89" stroke="#2F5FE0" fill="none" stroke-width="1.6" marker-end="url(#b5)"/>
+        <text x="416" y="80" font-size="10" fill="#2F5FE0">NDJSON over a pipe</text>
+        <text x="416" y="106" font-size="9.5" fill="currentColor" opacity=".65">one reply per request, always</text>
+
+        <text x="516" y="26" font-size="10" letter-spacing="1.4" fill="currentColor" opacity=".55">SIDECAR &mdash; separate environment</text>
+        <rect x="516" y="38" width="400" height="176" rx="3" fill="none" stroke="currentColor"
+              stroke-width="1.3" stroke-dasharray="7 5" opacity=".7"/>
+
+        <rect x="540" y="66" width="176" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.4"/>
+        <text x="554" y="88" fill="currentColor">SAM / a detector</text>
+        <text x="554" y="104" font-size="10" fill="currentColor" opacity=".65">torch + GPU</text>
+
+        <rect x="740" y="66" width="152" height="46" rx="3" fill="none" stroke="currentColor" stroke-width="1.2" opacity=".8"/>
+        <text x="754" y="88" font-size="10.5" fill="currentColor">embedding cache</text>
+        <text x="754" y="104" font-size="9.5" fill="currentColor" opacity=".65">encode ahead</text>
+        <path d="M 716 89 L 736 89" stroke="currentColor" fill="none" opacity=".5" marker-end="url(#b5)"/>
+
+        <rect x="540" y="158" width="352" height="40" rx="3" fill="none" stroke="#BE4230" stroke-width="1.3"/>
+        <text x="554" y="176" font-size="10.5" fill="#BE4230">crash, OOM, segfault</text>
+        <text x="554" y="191" font-size="10" fill="currentColor" opacity=".75">kills this box only &mdash; one button greys out, drawing continues</text>
+      </g>
+    </svg>
+    <figcaption><b>The boundary is a process, always &mdash; including on a laptop.</b>
+      <code>import torch</code> costs 3&ndash;8 seconds and half a gigabyte, and a CUDA failure
+      takes down whatever process it lands in. Absence is a tested normal state, not an error.
+      Same messages over a pipe locally and over HTTP to a hosted GPU service.</figcaption>
+  </figure>
+</section>
+
+<!-- ================================================================= -->
+<section id="loop">
+  <h2><span class="eyebrow">Designed, not built</span>The loop that gets cheaper each turn</h2>
+
+  <p class="lede">This is the workflow the annotation editor exists to serve. Every box below is
+    dashed: the pieces it needs are specified and de-risked, and none of them are written yet.</p>
+
+  <figure>
+    <svg viewBox="0 0 900 300" role="img" aria-label="A cycle: annotate a thousand images by hand, train a model, run inference on unseen images, load those predictions back into the editor where they render dashed, correct the wrong boxes by dragging or redrawing, and export only the reviewed images back into training. Each turn of the cycle requires less hand correction than the last.">
+      <defs>
+        <marker id="b6" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+        </marker>
+        <marker id="b6a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M 0 0 L 10 5 L 0 10 z" fill="#2F5FE0"/>
+        </marker>
+      </defs>
+      <g font-family="ui-monospace, monospace" font-size="11.5">
+        <g stroke-dasharray="6 4">
+          <rect x="40"  y="40"  width="168" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="286" y="40"  width="168" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="532" y="40"  width="168" height="52" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="532" y="164" width="168" height="70" rx="3" fill="none" stroke="#2F5FE0" stroke-width="2"/>
+          <rect x="286" y="164" width="168" height="70" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <rect x="40"  y="164" width="168" height="70" rx="3" fill="none" stroke="currentColor" stroke-width="1.5"/>
+        </g>
+
+        <text x="56" y="62"  fill="currentColor">1 &mdash; annotate</text>
+        <text x="56" y="80"  font-size="10" fill="currentColor" opacity=".7">~1000 by hand</text>
+
+        <text x="302" y="62" fill="currentColor">2 &mdash; train</text>
+        <text x="302" y="80" font-size="10" fill="currentColor" opacity=".7">outside the tool</text>
+
+        <text x="548" y="62" fill="currentColor">3 &mdash; infer</text>
+        <text x="548" y="80" font-size="10" fill="currentColor" opacity=".7">on unseen images</text>
+
+        <text x="548" y="188" fill="#2F5FE0">4 &mdash; review</text>
+        <text x="548" y="206" font-size="10" fill="currentColor" opacity=".75">predictions dashed,</text>
+        <text x="548" y="222" font-size="10" fill="currentColor" opacity=".75">space accepts &amp; advances</text>
+
+        <text x="302" y="188" fill="currentColor">5 &mdash; correct</text>
+        <text x="302" y="206" font-size="10" fill="currentColor" opacity=".75">drag, redraw, relabel;</text>
+        <text x="302" y="222" font-size="10" fill="currentColor" opacity=".75">edited shapes turn solid</text>
+
+        <text x="56" y="188" fill="currentColor">6 &mdash; export</text>
+        <text x="56" y="206" font-size="10" fill="currentColor" opacity=".75">reviewed only,</text>
+        <text x="56" y="222" font-size="10" fill="currentColor" opacity=".75">by default</text>
+
+        <path d="M 208 66 L 282 66"  stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b6)"/>
+        <path d="M 454 66 L 528 66"  stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b6)"/>
+        <path d="M 616 92 L 616 160" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b6)"/>
+        <path d="M 532 199 L 458 199" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b6)"/>
+        <path d="M 286 199 L 212 199" stroke="currentColor" fill="none" opacity=".55" marker-end="url(#b6)"/>
+        <path d="M 124 164 L 124 96"  stroke="#2F5FE0" fill="none" stroke-width="1.6" marker-end="url(#b6a)"/>
+        <text x="134" y="132" font-size="10" fill="#2F5FE0">more data, better model</text>
+
+        <text x="40" y="272" font-size="10.5" fill="currentColor" opacity=".75">
+          Each turn needs less hand correction than the last. The headline number is
+          <tspan fill="#2F5FE0">model agreement %</tspan> &mdash; it says when to retrain, and when to stop reviewing.
+        </text>
+      </g>
+    </svg>
+    <figcaption><b>Why export defaults to reviewed-only.</b> Feeding unreviewed model output back
+      into training is how a model poisons itself, and it fails silently &mdash; the numbers keep
+      looking fine. The safe option is the default; the override is explicit and named.</figcaption>
+  </figure>
+</section>
+
+<!-- ================================================================= -->
+<section id="state">
+  <h2><span class="eyebrow">Where the line is</span>Built, and not built</h2>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Area</th><th class="n">Lines</th><th>State</th></tr></thead>
+      <tbody>
+        <tr><td>core/ops &mdash; the 27 operations</td><td class="n">3,701</td><td>tested</td></tr>
+        <tr><td>core &mdash; registry, imaging, pairs, writer, stats</td><td class="n">1,943</td><td>tested</td></tr>
+        <tr><td>core/annotations &mdash; the five formats</td><td class="n">1,549</td><td>tested</td></tr>
+        <tr><td>annotate/tools &mdash; the heavy-tool boundary</td><td class="n">777</td><td>tested against a fake tool</td></tr>
+        <tr><td>service &mdash; sandboxed HTTP + web UI</td><td class="n">754</td><td>tested, 34 of them refusals</td></tr>
+        <tr><td>cli &mdash; commands, menu, rendering</td><td class="n">613</td><td>tested</td></tr>
+        <tr><td>tests</td><td class="n">3,273</td><td>433 passing</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Phase 0 is complete: the wire format, the heavy-tool boundary, image orientation, and a
+    measured canvas spike that holds 60fps with 300 shapes on a 4000&times;3000 image. None of
+    those committed us to a user interface; all four settled a decision that would have been
+    expensive to revisit.</p>
+
+  <p><b>Not built:</b> the canvas editor itself, the SQLite store behind it, projects and image
+    state, prediction import and review, and the SAM sidecar. That is Phases 1 to 3.</p>
+
+  <div class="note risk">
+    <span class="tag">The one thing to fix first</span>
+    <p>Exporting to YOLO builds its class list from whatever labels happen to be present, sorted.
+      Add one class mid-project and every index shifts &mdash; silently re-labelling every
+      <code>.txt</code> already exported. The ordered label table in Phase 1 fixes it, and it gets
+      a regression test on day one.</p>
+  </div>
+</section>
+
+<!-- ================================================================= -->
+<section id="speed">
+  <h2><span class="eyebrow">Cost to run</span>Measured, on the real data</h2>
+
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Stage</th><th class="n">Serial</th><th class="n">Parallel</th><th class="n"></th></tr></thead>
+      <tbody>
+        <tr><td>resize &mdash; 3,686 images</td><td class="n">186.6s</td><td class="n">24.2s</td><td class="n gain">7.7&times;</td></tr>
+        <tr><td>dedup &mdash; perceptual, 2,783 images</td><td class="n">95.6s</td><td class="n">33.2s</td><td class="n gain">2.9&times;</td></tr>
+        <tr><td>augment &mdash; 5,896 variants</td><td class="n">288.4s</td><td class="n">124.0s</td><td class="n gain">2.3&times;</td></tr>
+        <tr><td>health &mdash; 9,582 images</td><td class="n">217.7s</td><td class="n">112.4s</td><td class="n gain">1.9&times;</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p>Byte-identical output either way. Parallelism is confined to functions with no shared state,
+    and results are consumed in input order &mdash; dedup keeps the first image it sees and COCO
+    ids follow write order, so anything depending on which thread finished first would not be
+    reproducible.</p>
+</section>
+
+<footer>
+  Data Factory &middot; Shivpratap Singh Panwar, Kody Technolab Public Limited &middot;
+  27 operations, 5 formats, 433 tests &middot; merged to <code>master</code> at 19ecbd1
+</footer>
+
+</div>

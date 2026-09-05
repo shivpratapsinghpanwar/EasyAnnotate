@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Annotate — Data Factory</title>
+<style>
+  :root {
+    --bg: #0d0d0c;
+    --panel: #161614;
+    --line: #2a2a27;
+    --ink: #e8e6e1;
+    --dim: #96938c;
+    --accent: #3cb44b;
+    --warn: #d88b2f;
+    --bad: #d8483f;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+  header h1 { font-size: 14px; font-weight: 600; margin: 0; }
+  header .spacer { flex: 1; }
+
+  button {
+    background: #22221f; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 5px; padding: 5px 10px; font: inherit; cursor: pointer;
+  }
+  button:hover { background: #2c2c28; }
+  button[data-current="true"] { background: #34342e; border-color: #4a4a42; }
+
+  #status { font-size: 12px; color: var(--dim); min-width: 62px; text-align: right; }
+  #status[data-state="saved"] { color: var(--accent); }
+  #status[data-state="pending"], #status[data-state="saving"] { color: var(--warn); }
+  #status[data-state="error"], #status[data-state="conflict"] { color: var(--bad); }
+
+  main { display: grid; grid-template-columns: 180px 1fr 210px; min-height: 0; }
+
+  #filmstrip, #labels {
+    background: var(--panel); display: flex; flex-direction: column; min-height: 0;
+  }
+  #filmstrip { border-right: 1px solid var(--line); }
+  #labels { border-left: 1px solid var(--line); }
+
+  .panel-head {
+    padding: 8px 10px; font-size: 11px; text-transform: uppercase;
+    letter-spacing: .07em; color: var(--dim); border-bottom: 1px solid var(--line);
+  }
+
+  [data-role="strip-list"] { overflow-y: auto; flex: 1; padding: 6px; }
+  .strip-item {
+    display: grid; grid-template-columns: 3px 44px 1fr; gap: 7px;
+    align-items: center; padding: 4px; border-radius: 5px; cursor: pointer;
+  }
+  .strip-item:hover { background: #232320; }
+  .strip-item[data-current="true"] { background: #2e2e28; outline: 1px solid #4a4a42; }
+  .strip-item img { width: 44px; height: 33px; object-fit: cover; border-radius: 3px; display: block; }
+  .strip-item[data-broken="true"]::before {
+    content: "?"; width: 44px; height: 33px; display: grid; place-items: center;
+    background: #262622; border-radius: 3px; color: var(--dim);
+  }
+  [data-role="strip-state"] { width: 3px; height: 30px; border-radius: 2px; }
+  [data-role="strip-name"] {
+    font-size: 11px; color: var(--dim); overflow: hidden;
+    text-overflow: ellipsis; white-space: nowrap;
+  }
+  [data-role="strip-counts"] {
+    padding: 7px 10px; border-top: 1px solid var(--line);
+    font-size: 11px; color: var(--dim);
+  }
+
+  #stage { position: relative; min-width: 0; min-height: 0; }
+  #canvas { width: 100%; height: 100%; display: block; touch-action: none; }
+  #progress {
+    position: absolute; left: 12px; bottom: 10px;
+    background: rgba(0,0,0,.65); padding: 4px 9px; border-radius: 5px;
+    font-size: 11px; color: var(--dim); pointer-events: none; max-width: 70%;
+  }
+
+  [data-role="label-input"] {
+    width: 100%; background: #1d1d1a; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: inherit;
+  }
+  .label-wrap { padding: 8px; border-bottom: 1px solid var(--line); }
+  [data-role="label-list"] { overflow-y: auto; flex: 1; padding: 6px; }
+  .label-item {
+    display: grid; grid-template-columns: 22px 1fr auto auto; gap: 7px;
+    align-items: center; padding: 5px 6px; border-radius: 5px; cursor: pointer;
+  }
+  .label-item:hover { background: #232320; }
+  .label-item[data-current="true"] { background: #2e2e28; outline: 1px solid #4a4a42; }
+  [data-role="swatch"] {
+    width: 22px; height: 18px; border-radius: 3px; display: grid;
+    place-items: center; font-size: 10px; font-weight: 700;
+  }
+  [data-role="name"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  [data-role="key"] {
+    font-size: 10px; color: var(--dim); border: 1px solid var(--line);
+    border-radius: 3px; padding: 0 4px; min-width: 15px; text-align: center;
+  }
+  [data-role="retire"] {
+    background: none; border: none; color: var(--dim); padding: 0 3px;
+    font-size: 14px; line-height: 1; cursor: pointer;
+  }
+  [data-role="retire"]:hover { color: var(--bad); background: none; }
+
+  .hint { padding: 8px 10px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
+
+  #help {
+    position: fixed; inset: 0; background: rgba(6,6,5,.9);
+    display: grid; place-items: center; z-index: 20;
+  }
+  #help[hidden] { display: none; }
+  #help .card {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 9px;
+    padding: 20px 26px; max-width: 620px;
+  }
+  #help h2 { margin: 0 0 12px; font-size: 15px; }
+  #help dl { display: grid; grid-template-columns: auto 1fr; gap: 5px 16px; margin: 0; }
+  #help dt { color: var(--dim); white-space: nowrap; }
+  #help dd { margin: 0; }
+  kbd {
+    background: #24241f; border: 1px solid var(--line); border-bottom-width: 2px;
+    border-radius: 4px; padding: 1px 5px; font: 11px ui-monospace, monospace;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <h1 id="project-name">Annotating</h1>
+  <span id="image-name" style="color:var(--dim)"></span>
+  <span class="spacer"></span>
+  <button data-tool="select" data-current="true" title="Select and edit (V)">Select</button>
+  <button data-tool="box" title="Draw a box (B)">Box</button>
+  <button data-tool="polygon" title="Draw a polygon (P)">Polygon</button>
+  <button id="btn-fit" title="Fit the image (F)">Fit</button>
+  <button id="btn-prev" title="Previous image (E)">‹</button>
+  <button id="btn-next" title="Next image (N)">›</button>
+  <button id="btn-review" title="Mark reviewed and move on (R)">Reviewed ✓</button>
+  <button id="btn-help" title="Shortcuts (?)">?</button>
+  <span id="status"></span>
+</header>
+
+<main>
+  <section id="filmstrip">
+    <div class="panel-head">Images</div>
+    <div data-role="strip-list"></div>
+    <div data-role="strip-counts"></div>
+    <template data-role="strip-item">
+      <div class="strip-item">
+        <div data-role="strip-state"></div>
+        <img alt="" loading="lazy">
+        <div data-role="strip-name"></div>
+      </div>
+    </template>
+  </section>
+
+  <section id="stage">
+    <canvas id="canvas"></canvas>
+    <div id="progress">drag to draw a box · type a name to make a class · press ? for keys</div>
+  </section>
+
+  <section id="labels">
+    <div class="panel-head">Classes</div>
+    <div class="label-wrap">
+      <input data-role="label-input" type="text" placeholder="Type a class name, Enter"
+             autocomplete="off" spellcheck="false">
+    </div>
+    <div data-role="label-list"></div>
+
+    <div id="review" hidden>
+      <div class="panel-head" style="border-top:1px solid var(--line)">Review</div>
+      <div style="padding:8px 10px">
+        <label for="conf" style="font-size:11px;color:var(--dim)">
+          Show predictions above <b id="conf-value">0%</b>
+        </label>
+        <input id="conf" type="range" min="0" max="100" value="0" style="width:100%">
+        <div id="agreement" style="font-size:11px;color:var(--dim);margin-top:6px"></div>
+        <button id="btn-accept" style="width:100%;margin-top:8px">
+          Accept all &amp; next <kbd>A</kbd>
+        </button>
+      </div>
+    </div>
+
+    <div class="hint">
+      Number keys pick a class. With a shape selected, they re-class it.
+      Renaming never moves a class index.
+    </div>
+    <div id="tools" hidden>
+      <div class="panel-head" style="border-top:1px solid var(--line)">Assist</div>
+      <div data-role="tool-list" style="padding:8px 10px;display:grid;gap:6px"></div>
+      <div class="hint" style="border-top:none;padding-top:0">
+        Pick a tool, then drag a box around the object.
+      </div>
+      <template data-role="tool-item"><div><button style="width:100%"></button></div></template>
+    </div>
+
+    <div style="padding:8px 10px;border-top:1px solid var(--line)">
+      <button id="btn-predictions" style="width:100%">Load model predictions…</button>
+      <input id="predictions-file" type="file" accept=".zip,.json" hidden>
+    </div>
+    <template data-role="label-item">
+      <div class="label-item">
+        <span data-role="swatch"></span>
+        <span data-role="name"></span>
+        <span data-role="key"></span>
+        <button data-role="retire" title="Retire this class">×</button>
+      </div>
+    </template>
+  </section>
+</main>
+
+<div id="help" hidden>
+  <div class="card">
+    <h2>Shortcuts</h2>
+    <dl>
+      <dt><kbd>drag</kbd></dt><dd>Draw a box in the current class</dd>
+      <dt><kbd>P</kbd></dt><dd>Polygon: click points, <kbd>Enter</kbd> or double-click to close</dd>
+      <dt><kbd>V</kbd> <kbd>B</kbd></dt><dd>Select tool · Box tool</dd>
+      <dt><kbd>1</kbd>–<kbd>0</kbd></dt><dd>Pick a class — or re-class what is selected</dd>
+      <dt><kbd>Alt</kbd>+click</dt><dd>On a vertex: delete it. On an edge midpoint: insert one</dd>
+      <dt>right-click</dt><dd>Delete the shape under the cursor</dd>
+      <dt><kbd>Del</kbd></dt><dd>Delete the selection</dd>
+      <dt><kbd>Ctrl</kbd>+<kbd>Z</kbd></dt><dd>Undo · <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd> redo</dd>
+      <dt><kbd>Ctrl</kbd>+<kbd>D</kbd></dt><dd>Copy the previous image's shapes</dd>
+      <dt><kbd>N</kbd> <kbd>E</kbd></dt><dd>Next · previous image</dd>
+      <dt><kbd>A</kbd></dt><dd>Accept every prediction here as correct, and move on</dd>
+      <dt><kbd>R</kbd></dt><dd>Mark reviewed and move on</dd>
+      <dt><kbd>S</kbd></dt><dd>Skip — "I can't tell". Never exported</dd>
+      <dt><kbd>F</kbd> <kbd>0</kbd></dt><dd>Fit · actual size</dd>
+      <dt>wheel</dt><dd>Zoom at the cursor · <kbd>Space</kbd>-drag or middle-drag to pan</dd>
+      <dt><kbd>Ctrl</kbd>+<kbd>S</kbd></dt><dd>Nothing to do — it saves as you go</dd>
+    </dl>
+  </div>
+</div>
+
+<script type="module" src="/static/annotate/app.js"></script>
+</body>
+</html>

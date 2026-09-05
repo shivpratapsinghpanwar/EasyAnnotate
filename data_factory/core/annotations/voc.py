@@ -14,6 +14,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from xml.dom import minidom
 
+from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 
@@ -95,6 +96,7 @@ def _read_object(obj: ET.Element, path: Path) -> Shape | None:
         truncated=_int(_text(obj, "truncated")),
         difficult=_int(_text(obj, "difficult")),
         occluded=_int(_text(obj, "occluded")),
+        confidence=_score(obj),
     )
 
 
@@ -165,6 +167,11 @@ def write(annotation: Annotation, path: Path) -> Path:
         ET.SubElement(obj, "truncated").text = str(shape.truncated)
         ET.SubElement(obj, "difficult").text = str(shape.difficult)
         ET.SubElement(obj, "occluded").text = str(shape.occluded)
+        # Written only when there is one, so a hand-drawn label produces
+        # byte-identical XML to before -- a <score>1.0</score> appearing on
+        # every ground-truth object would be a lie about where it came from.
+        if shape.confidence is not None:
+            ET.SubElement(obj, "score").text = f"{float(shape.confidence):.6f}"
 
         bndbox = ET.SubElement(obj, "bndbox")
         ET.SubElement(bndbox, "xmin").text = str(shape.bbox[0])
@@ -180,9 +187,9 @@ def write(annotation: Annotation, path: Path) -> Path:
                 ET.SubElement(polygon, f"y{index}").text = str(int(y))
 
     pretty = minidom.parseString(ET.tostring(root, encoding="unicode")).toprettyxml(indent="  ")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(pretty, encoding="utf-8")
-    return path
+    # Atomic: a half-written XML is an unparseable label, and the original
+    # is already gone by the time the write fails.
+    return write_text_atomic(path, pretty)
 
 
 def write_background(filename: str, width: int, height: int, path: Path) -> Path:
@@ -205,3 +212,20 @@ def _int(value: str | None) -> int:
         return int(float(value.strip()))
     except (ValueError, AttributeError):
         return 0
+
+
+def _score(obj: ET.Element) -> float | None:
+    """A detector's confidence, if this object carries one.
+
+    Not part of the Pascal VOC spec, which predates anyone wanting to round
+    trip model output. Reading it is harmless -- files without it are
+    unaffected -- and it is what lets predictions survive a trip through the
+    format the rest of this tool already speaks.
+    """
+    raw = _text(obj, "score")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None

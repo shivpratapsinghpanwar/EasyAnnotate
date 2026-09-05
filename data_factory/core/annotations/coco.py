@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from .model import Annotation, Point, Shape
+from ..fs import write_text_atomic
+from .model import Annotation, AnnotationError, Point, Shape
 
 #: How to decide whether two label spellings are the same class.
 CASE_POLICIES = ("exact", "casefold")
@@ -133,7 +134,7 @@ class CocoBuilder:
 
     def write(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(self.build(), indent=2), encoding="utf-8")
+        write_text_atomic(path, json.dumps(self.build(), indent=2))
         return path
 
     def stats(self) -> dict[str, int]:
@@ -150,6 +151,94 @@ def load(path: Path) -> dict[str, Any]:
     return json.loads(Path(path).read_text(encoding="utf-8"))
 
 
+def _score(ann: dict[str, Any]) -> float | None:
+    """A detection's confidence, if it has one."""
+    raw = ann.get("score")
+    if raw is None:
+        return None
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
+
+
+def is_detection_results(document: Any) -> bool:
+    """Whether this is the *detection results* form rather than a dataset.
+
+    torchvision, mmdetection and Ultralytics all evaluate against a bare JSON
+    **list** of ``{image_id, category_id, bbox, score}`` -- no ``images``, no
+    ``categories``. It is what you get out of a model, and it is therefore the
+    exact file someone will try to load back in for review.
+    """
+    return isinstance(document, list)
+
+
+def results_to_annotations(
+    results: list[dict[str, Any]],
+    *,
+    names: dict[Any, str] | None = None,
+    sizes: dict[Any, tuple[int, int]] | None = None,
+    filenames: dict[Any, str] | None = None,
+) -> list[Annotation]:
+    """Read the detection-results form into annotations.
+
+    Everything a dataset document would have carried -- image file names,
+    sizes, category names -- is absent here, because the file is designed to be
+    read *alongside* the dataset it was evaluated on. Callers pass what they
+    know; anything missing degrades to a usable stand-in rather than an error,
+    because refusing to show a person their model's output on a technicality
+    helps nobody.
+    """
+    names = names or {}
+    sizes = sizes or {}
+    filenames = filenames or {}
+    by_image: dict[Any, Annotation] = {}
+
+    for entry in results:
+        if not isinstance(entry, dict):
+            continue
+        image_id = entry.get("image_id")
+        bbox = entry.get("bbox") or [0, 0, 0, 0]
+        try:
+            x, y, w, h = (float(v) for v in bbox[:4])
+        except (TypeError, ValueError):
+            continue
+
+        annotation = by_image.get(image_id)
+        if annotation is None:
+            width, height = sizes.get(image_id, (0, 0))
+            annotation = Annotation(
+                filename=filenames.get(image_id, f"{image_id}"),
+                width=width,
+                height=height,
+                shapes=[],
+            )
+            by_image[image_id] = annotation
+
+        category = entry.get("category_id")
+        segmentation = entry.get("segmentation")
+        polygon = (
+            _first_polygon(segmentation)
+            if isinstance(segmentation, list) and segmentation
+            else None
+        )
+        annotation.shapes.append(
+            Shape(
+                label=names.get(category, f"class_{category}"),
+                bbox=(int(round(x)), int(round(y)), int(round(x + w)), int(round(y + h))),
+                polygon=polygon,
+                confidence=_score(entry),
+            )
+        )
+
+    for annotation in by_image.values():
+        if (annotation.width <= 0 or annotation.height <= 0) and annotation.shapes:
+            annotation.width = max(s.bbox[2] for s in annotation.shapes) + 1
+            annotation.height = max(s.bbox[3] for s in annotation.shapes) + 1
+
+    return [by_image[k] for k in sorted(by_image, key=lambda k: str(by_image[k].filename))]
+
+
 def to_annotations(
     coco: dict[str, Any], *, unsupported_out: list[str] | None = None
 ) -> list[Annotation]:
@@ -163,6 +252,20 @@ def to_annotations(
     become a polygon without a mask decoder, so the box is kept and the fact is
     reported through ``unsupported_out`` rather than passed off as a polygon.
     """
+    if is_detection_results(coco):
+        # Previously this raised AttributeError deep inside a dict lookup,
+        # which told the user nothing about what they had actually handed over.
+        raise AnnotationError(
+            "this is a COCO *detection results* file (a bare list of "
+            "predictions), not a dataset. It has no images or categories of "
+            "its own -- load it against the project it was run on, with "
+            "results_to_annotations, or import it as predictions."
+        )
+    if not isinstance(coco, dict):
+        raise AnnotationError(
+            f"a COCO document must be an object, got {type(coco).__name__}"
+        )
+
     names = {c["id"]: str(c.get("name", f"class_{c['id']}")) for c in coco.get("categories", [])}
     by_image: dict[int, Annotation] = {}
 
@@ -202,6 +305,10 @@ def to_annotations(
                     int(round(y + h)),
                 ),
                 polygon=polygon,
+                # 'score' is what every detector writes and no ground-truth
+                # file has. Carrying it is what lets the review layer tell a
+                # prediction from a label rather than trusting a filename.
+                confidence=_score(ann),
             )
         )
 

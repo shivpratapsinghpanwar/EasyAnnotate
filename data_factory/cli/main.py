@@ -89,6 +89,23 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--reload", action="store_true", help="auto-reload on code changes")
     serve.set_defaults(_handler=_cmd_serve)
 
+    annotate = subparsers.add_parser(
+        "annotate",
+        help="open a folder in the annotation editor, editing its labels in place",
+    )
+    annotate.add_argument("folder", help="folder of images to annotate")
+    annotate.add_argument("--name", default="", help="project name; defaults to the folder name")
+    annotate.add_argument("--port", type=int, default=8765, help="port to listen on")
+    annotate.add_argument("--host", default="127.0.0.1", help="bind address")
+    annotate.add_argument("--workspace", help="where the annotation database lives")
+    annotate.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    annotate.add_argument(
+        "--no-import",
+        action="store_true",
+        help="ignore label files already in the folder instead of loading them",
+    )
+    annotate.set_defaults(_handler=_cmd_annotate)
+
     for operation in registry.all_operations():
         _add_operation_parser(subparsers, operation)
 
@@ -238,6 +255,90 @@ def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         host=args.host,
         port=args.port,
         reload=args.reload,
+        log_level="warning",
+    )
+    return 0
+
+
+def _cmd_annotate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    """Open a folder for annotation, editing its label files in place.
+
+    This is the only way to create an attached project, and that is deliberate:
+    it takes a path, and no HTTP route is ever allowed to. The path comes from
+    a person typing it into their own terminal, not from a request.
+    """
+    import os
+
+    if args.workspace:
+        os.environ["DATAFACTORY_WORKSPACE"] = str(Path(args.workspace).expanduser())
+
+    try:
+        import uvicorn  # noqa: F401
+    except ImportError:
+        err.write(
+            "the editor needs the 'web' extra:\n"
+            '    pip install "data-factory[web]"\n'
+        )
+        return 2
+
+    from ..annotate import attach
+    from ..annotate.store import StoreError
+    from ..service.deps import get_store, store_path
+
+    folder = Path(args.folder).expanduser()
+    try:
+        summary = attach.open_folder(
+            get_store(),
+            folder,
+            name=args.name,
+            import_annotations=not args.no_import,
+        )
+    except StoreError as exc:
+        err.write(f"{exc}\n")
+        return 1
+
+    project = summary["project"]
+    out.write(f"\n{project.name}\n")
+    out.write(f"  folder     {project.root}\n")
+    out.write(
+        f"  images     {summary['images']}"
+        + (f" ({summary['new_images']} new)" if summary["reused"] else "")
+        + "\n"
+    )
+    if summary["shapes_imported"]:
+        out.write(f"  imported   {summary['shapes_imported']} existing shapes\n")
+    if summary["writes_back"]:
+        out.write(
+            f"  writes to  {summary['sidecar_format'].upper()} files in that folder, "
+            f"as you draw\n"
+        )
+    else:
+        out.write(
+            "  writes to  nothing on disk -- this format keeps one file for the\n"
+            "             whole dataset, so use annotate.export to get it back\n"
+        )
+    out.write(f"  database   {store_path()}\n")
+    for warning in summary["warnings"]:
+        out.write(f"  note       {warning}\n")
+
+    host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
+    url = f"http://{host}:{args.port}/annotate?project={project.id}"
+    out.write(f"\n{url}\n")
+    out.write("Press Ctrl+C to stop.\n")
+    out.flush()
+
+    if not args.no_browser:
+        import threading
+        import webbrowser
+
+        threading.Timer(1.0, lambda: webbrowser.open(url)).start()
+
+    import uvicorn
+
+    uvicorn.run(
+        "data_factory.service.app:app",
+        host=args.host,
+        port=args.port,
         log_level="warning",
     )
     return 0

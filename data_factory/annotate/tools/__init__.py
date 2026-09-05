@@ -22,6 +22,8 @@ from .protocol import (
 )
 from .registry import REGISTRY, NullTool, ToolRegistry
 
+from . import postprocess
+
 __all__ = [
     "PROTOCOL_VERSION",
     "REGISTRY",
@@ -33,4 +35,5 @@ __all__ = [
     "ToolRegistry",
     "ToolSpec",
     "ToolUnavailable",
+    "postprocess",
 ]

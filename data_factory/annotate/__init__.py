@@ -12,4 +12,4 @@ CLI can drive the same store as the browser.
 
 from __future__ import annotations
 
-__all__ = ["tools"]
+__all__ = ["attach", "images", "labels", "projects", "shapes", "store", "tools"]

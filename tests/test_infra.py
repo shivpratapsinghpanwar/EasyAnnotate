@@ -8,6 +8,7 @@ recorded without any operation having to remember to do it.
 from __future__ import annotations
 
 import json
+import time
 from pathlib import Path
 
 import pytest
@@ -214,3 +215,155 @@ class TestProvenance:
         assert provenance.history_path(out).exists()
         assert formats.detect(out) == "voc"
         assert formats.read_dataset(out, "auto").stats()["images"] == 7
+
+
+class TestAtomicWrites:
+    """A label file must never be observed half-written.
+
+    The failure this prevents is silent and destructive: `write_text` truncates
+    first and fills second, so a crash or a full disk between the two leaves an
+    unparseable file *and* the original contents are already gone. Two writers
+    at once interleave the same way. The annotation editor writes through to
+    sidecar files on every save, so this is now on a hot path.
+    """
+
+    def test_the_file_is_written(self, tmp_path: Path):
+        from data_factory.core.fs import write_text_atomic
+
+        target = tmp_path / "nested" / "a.txt"
+        write_text_atomic(target, "hello")
+        assert target.read_text(encoding="utf-8") == "hello"
+
+    def test_no_temporary_file_is_left_behind(self, tmp_path: Path):
+        from data_factory.core.fs import write_text_atomic
+
+        write_text_atomic(tmp_path / "a.txt", "hello")
+        assert [p.name for p in tmp_path.iterdir()] == ["a.txt"]
+
+    def test_a_failed_write_leaves_the_original_intact(self, tmp_path: Path, monkeypatch):
+        """The whole point. A partial write must not destroy what was there."""
+        from data_factory.core import fs
+
+        target = tmp_path / "a.txt"
+        target.write_text("the original", encoding="utf-8")
+
+        def explode(*_args, **_kwargs):
+            raise OSError(28, "No space left on device")
+
+        monkeypatch.setattr(fs.os, "replace", explode)
+
+        with pytest.raises(OSError):
+            fs.write_text_atomic(target, "replacement")
+
+        assert target.read_text(encoding="utf-8") == "the original"
+        assert list(tmp_path.iterdir()) == [target], "the temp file must be cleaned up"
+
+    def test_a_rename_windows_transiently_refuses_is_retried(self, tmp_path: Path, monkeypatch):
+        """Windows fails the rename if anything has the destination open --
+        an antivirus scanner opening the file we just wrote is enough. Found
+        by the concurrency test below, which failed within a few hundred
+        iterations before this retry existed."""
+        from data_factory.core import fs
+
+        target = tmp_path / "a.txt"
+        real_replace = fs.os.replace
+        calls = {"n": 0}
+
+        def flaky(src, dst):
+            calls["n"] += 1
+            if calls["n"] < 3:
+                raise PermissionError(5, "Access is denied")
+            return real_replace(src, dst)
+
+        monkeypatch.setattr(fs.os, "replace", flaky)
+        monkeypatch.setattr(fs, "_REPLACE_PAUSE", 0.001)
+
+        fs.write_text_atomic(target, "written anyway")
+        assert target.read_text(encoding="utf-8") == "written anyway"
+        assert calls["n"] == 3
+
+    def test_a_rename_that_never_succeeds_still_raises(self, tmp_path: Path, monkeypatch):
+        """Retrying must not turn a real failure into a silent one."""
+        from data_factory.core import fs
+
+        def always_denied(*_args, **_kwargs):
+            raise PermissionError(5, "Access is denied")
+
+        monkeypatch.setattr(fs.os, "replace", always_denied)
+        monkeypatch.setattr(fs, "_REPLACE_PAUSE", 0.001)
+
+        with pytest.raises(PermissionError):
+            fs.write_text_atomic(tmp_path / "a.txt", "never lands")
+        assert list(tmp_path.iterdir()) == []
+
+    def test_concurrent_writers_never_produce_a_mixed_file(self, tmp_path: Path):
+        """Either writer may win. Neither may produce a blend of the two."""
+        import threading
+
+        from data_factory.core.fs import write_text_atomic
+
+        target = tmp_path / "busy.txt"
+        first = "A" * 40_000
+        second = "B" * 40_000
+        seen: list[str] = []
+
+        def read_eventually() -> str | None:
+            # Windows refuses the *read* too, while a rename is swapping the
+            # file in. Unlike a torn write this is loud and transient, so it is
+            # tolerated here rather than retried inside every format reader.
+            # Worth knowing: running `convert.dataset` over a folder while the
+            # editor is writing through to it can fail this way, visibly.
+            for _ in range(50):
+                try:
+                    return target.read_text(encoding="utf-8")
+                except (PermissionError, OSError):
+                    time.sleep(0.002)
+            return None
+
+        def writer(payload: str) -> None:
+            for _ in range(20):
+                write_text_atomic(target, payload)
+                content = read_eventually()
+                if content is not None:
+                    seen.append(content)
+
+        threads = [threading.Thread(target=writer, args=(p,)) for p in (first, second)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        assert seen, "the test did not actually read anything"
+        for content in seen:
+            assert content in (first, second), "a reader saw a half-written file"
+
+    def test_voc_and_labelme_writers_are_atomic(self, tmp_path: Path):
+        """Guard against the writers being changed back to write_text."""
+        import inspect
+
+        from data_factory.core.annotations import coco, csvfmt, labelme, voc, yolo
+
+        for module in (voc, labelme, yolo, coco, csvfmt):
+            source = inspect.getsource(module)
+            assert "write_text_atomic" in source, f"{module.__name__} lost its atomic write"
+            assert "path.write_text(" not in source, f"{module.__name__} writes non-atomically"
+
+    def test_csv_does_not_gain_blank_lines_between_rows(self, tmp_path: Path):
+        """csv writes its own \r\n; translating those again doubles them."""
+        from data_factory.core.annotations import csvfmt
+        from data_factory.core.annotations.model import Annotation, Shape
+
+        path = tmp_path / "out.csv"
+        csvfmt.write(
+            [
+                Annotation(filename="a.jpg", width=10, height=10,
+                           shapes=[Shape(label="x", bbox=(1, 1, 5, 5))]),
+                Annotation(filename="b.jpg", width=10, height=10,
+                           shapes=[Shape(label="y", bbox=(2, 2, 6, 6))]),
+            ],
+            path,
+        )
+        raw = path.read_bytes()
+        assert b"\r\r\n" not in raw
+        rows = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+        assert len(rows) == 3, rows

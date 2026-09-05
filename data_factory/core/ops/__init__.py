@@ -7,6 +7,7 @@ schema at once -- no front-end needs editing.
 
 from . import (
     analyze,
+    annotate_export,
     audit,
     augment,
     collect,
@@ -25,6 +26,7 @@ from . import (
 
 __all__ = [
     "analyze",
+    "annotate_export",
     "audit",
     "augment",
     "collect",

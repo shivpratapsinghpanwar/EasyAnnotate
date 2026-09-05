@@ -143,12 +143,22 @@ def describe_operation(operation: Operation) -> dict[str, Any]:
 
 
 def public_schema() -> dict[str, Any]:
-    """Every operation, described for a browser."""
+    """Every operation a browser can usefully render a form for.
+
+    The ``hidden_from_web`` ones are filtered here and only here -- they stay
+    in ``datafactory list``, in ``schema``, and in recipes. An operation whose
+    real input is an annotation project rather than a folder has nothing the
+    batch panel could ask for, so offering it would only produce a refusal.
+    """
     from ..core import registry
 
     return {
         "version": 1,
-        "operations": [describe_operation(op) for op in registry.all_operations()],
+        "operations": [
+            describe_operation(op)
+            for op in registry.all_operations()
+            if not op.hidden_from_web
+        ],
     }
 
 

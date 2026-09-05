@@ -36,6 +36,7 @@ from typing import Any
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 import data_factory as df
@@ -46,6 +47,11 @@ from ..core.annotations.model import AnnotationError
 from ..core.registry import ParamError
 from . import binding
 from . import jobs as jobs_module
+from .routers import annotate as annotate_router
+from .routers import media as media_router
+from .routers import predictions as predictions_router
+from .routers import promote as promote_router
+from .routers import tools as tools_router
 from .workspace import (
     MAX_UPLOAD_BYTES,
     Workspace,
@@ -79,6 +85,15 @@ app = FastAPI(
     summary="Dataset preparation for computer vision: convert, clean, augment, analyse.",
     lifespan=lifespan,
 )
+
+# Annotation is stateful CRUD with a latency budget and cannot be expressed as
+# an operation, so it gets routers of its own rather than being forced through
+# the registry. See data_factory/annotate/__init__.py for the reasoning.
+app.include_router(annotate_router.router)
+app.include_router(media_router.router)
+app.include_router(promote_router.router)
+app.include_router(predictions_router.router)
+app.include_router(tools_router.router)
 
 _origins = [o.strip() for o in os.environ.get("DATAFACTORY_ORIGINS", "").split(",") if o.strip()]
 if _origins:
@@ -244,6 +259,10 @@ def run_operation(dataset_id: str, name: str, request: RunRequest) -> dict[str, 
         _record(operation.name, bound, result)
         return result
 
+    # A run creates or changes an output, so the cached description is stale
+    # the moment it is submitted.
+    _invalidate(dataset_id)
+
     job = JOBS.submit(
         job_id,
         operation.name,
@@ -280,6 +299,23 @@ def dataset_jobs(dataset_id: str) -> dict[str, Any]:
 
 STATIC = Path(__file__).parent / "static"
 
+# Only this package's own files are served here -- no user content ever lands
+# in this directory, so there is nothing for a traversal to reach that is not
+# already public.
+app.mount("/static", StaticFiles(directory=STATIC), name="static")
+
+
+@app.get("/annotate", include_in_schema=False)
+def annotate_page() -> FileResponse:
+    """The editor.
+
+    Hand-written ES modules with no build step, so the wheel stays
+    self-contained and ``pip install`` keeps working offline. Phase 0 measured
+    a plain canvas holding 60fps with 300 shapes on a 4000x3000 image, which is
+    what makes that defensible rather than merely convenient.
+    """
+    return FileResponse(STATIC / "annotate.html", media_type="text/html")
+
 
 @app.get("/", include_in_schema=False)
 def index() -> FileResponse:
@@ -299,8 +335,35 @@ def _dataset(dataset_id: str):
         raise HTTPException(404, str(exc)) from None
 
 
+#: ``_describe`` costs a full tree walk plus a complete annotation read, which
+#: is O(dataset) per request. That is affordable for a page load and hopeless
+#: for anything that polls, so the answer is held briefly and dropped whenever
+#: a run could have changed it.
+_DESCRIBE_TTL = 10.0
+_describe_cache: dict[str, tuple[float, dict[str, Any]]] = {}
+
+
+def _invalidate(dataset_id: str) -> None:
+    _describe_cache.pop(dataset_id, None)
+
+
 def _describe(dataset) -> dict[str, Any]:
     """What the dataset is, as far as we can tell, for the UI to show."""
+    cached = _describe_cache.get(dataset.id)
+    now = time.time()
+    if cached is not None and now - cached[0] < _DESCRIBE_TTL:
+        # Recompute the countdown; everything else is stable for the window.
+        payload = dict(cached[1])
+        payload["expires_in_seconds"] = max(
+            0, int(dataset.created_at() + WORKSPACE.ttl_seconds - now)
+        )
+        return payload
+    payload = _build_description(dataset)
+    _describe_cache[dataset.id] = (now, payload)
+    return dict(payload)
+
+
+def _build_description(dataset) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "inputs": binding.available_inputs(dataset),
         "size_bytes": dataset.size_bytes(),
