@@ -29,6 +29,10 @@ router = APIRouter(prefix="/api", tags=["media"], dependencies=[Depends(require_
 
 #: Thumbnail long edge. One size, because two sizes is a cache with a policy.
 THUMB_EDGE = 200
+#: Past this many pixels a thumbnail is refused rather than decoded: 200 MP
+#: is already 600 MB of BGR. Aerial and pathology images this big belong in
+#: image.tile first, which is the tool for them.
+MAX_DECODE_PIXELS = 200_000_000
 
 #: Browsers cache these hard: the bytes for a given image id never change --
 #: an edit changes shapes, not pixels.
@@ -115,8 +119,15 @@ def image_thumb(
             cached, media_type="image/jpeg", headers={"Cache-Control": CACHE_CONTROL}
         )
 
+    # A header can claim any size. Refusing past this before decoding is what
+    # stops one crafted PNG from asking the server for gigabytes.
+    # Unmeasurable counts as too large: Pillow refuses to read the header of
+    # a decompression bomb at all, and decoding "size unknown" with OpenCV --
+    # which has no such guard -- is exactly the hole this closes.
+    if not (width and height) or width * height > MAX_DECODE_PIXELS:
+        raise HTTPException(413, "that image is too large, or too damaged, to preview")
     try:
-        pixels = imaging.load(path)
+        pixels = imaging.load_reduced(path, imaging.reduction_for(width, height, THUMB_EDGE))
     except Exception:
         # A corrupt file is a normal thing to find in a dataset -- it is one of
         # the defects inspect.health reports. It must not be a 500.

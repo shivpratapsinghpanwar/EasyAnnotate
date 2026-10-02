@@ -37,6 +37,7 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field
 
 import data_factory as df
@@ -47,6 +48,7 @@ from ..core.annotations.model import AnnotationError
 from ..core.registry import ParamError
 from . import binding
 from . import jobs as jobs_module
+from .limits import BodyLimit
 from .routers import annotate as annotate_router
 from .routers import media as media_router
 from .routers import predictions as predictions_router
@@ -95,12 +97,17 @@ app.include_router(promote_router.router)
 app.include_router(predictions_router.router)
 app.include_router(tools_router.router)
 
+# Before anything reads a body. See limits.py for why the handler's own byte
+# count could never do this.
+app.add_middleware(BodyLimit, limit=MAX_UPLOAD)
+
 _origins = [o.strip() for o in os.environ.get("DATAFACTORY_ORIGINS", "").split(",") if o.strip()]
 if _origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=_origins,
-        allow_methods=["GET", "POST", "DELETE"],
+        # PUT and PATCH are how the editor saves shapes and changes state.
+        allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
         allow_headers=["X-API-Key", "Content-Type"],
     )
 
@@ -175,7 +182,9 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
                         413, f"upload exceeds the {MAX_UPLOAD / 1e6:.0f} MB limit"
                     )
                 handle.write(chunk)
-        stats = extract_zip(staged, dataset.source, workspace=WORKSPACE)
+        # Off the event loop: unpacking a large archive is seconds of disk
+        # work, and on the loop it would stall every save in the editor.
+        stats = await run_in_threadpool(extract_zip, staged, dataset.source, workspace=WORKSPACE)
     except HTTPException:
         WORKSPACE.delete(dataset.id)
         raise
@@ -185,7 +194,7 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict[str, Any]:
     finally:
         shutil.rmtree(staged.parent, ignore_errors=True)
 
-    return {"id": dataset.id, "uploaded": stats, **_describe(dataset)}
+    return {"id": dataset.id, "uploaded": stats, **(await run_in_threadpool(_describe, dataset))}
 
 
 @app.get("/api/datasets/{dataset_id}", dependencies=[Depends(require_key)])

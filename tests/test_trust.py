@@ -297,3 +297,94 @@ def test_the_docker_image_keeps_the_database_inside_its_volume():
 
     data_root = PurePosixPath(workspace).parent
     assert any(data_root == PurePosixPath(v) or PurePosixPath(v) in data_root.parents for v in volumes)
+
+
+# ------------------------------------------------------------------ uploads
+
+
+def test_an_oversized_upload_is_refused_before_it_touches_the_disk(tmp_path, monkeypatch):
+    """The handler counted bytes as it read the UploadFile -- after Starlette
+    had already spooled the whole body to a temp file. The cap now acts on
+    the declared length, so nothing is spooled at all."""
+    pytest.importorskip("fastapi")
+    import importlib
+
+    from fastapi.testclient import TestClient
+    from starlette import formparsers
+
+    monkeypatch.setenv("DATAFACTORY_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.setenv("DATAFACTORY_MAX_UPLOAD_MB", "1")
+    monkeypatch.delenv("DATAFACTORY_API_KEY", raising=False)
+    from data_factory.service import app as app_module
+    from data_factory.service import deps
+
+    deps.reset_stores()
+    importlib.reload(app_module)
+
+    spooled = []
+    real = formparsers.SpooledTemporaryFile
+
+    def spy(*args, **kwargs):
+        spooled.append(1)
+        return real(*args, **kwargs)
+
+    monkeypatch.setattr(formparsers, "SpooledTemporaryFile", spy)
+    try:
+        with TestClient(app_module.app) as client:
+            big = b"x" * (3 * 1024 * 1024)
+            response = client.post(
+                "/api/datasets", files={"file": ("big.zip", big, "application/zip")}
+            )
+        assert response.status_code == 413
+        assert spooled == []
+    finally:
+        monkeypatch.delenv("DATAFACTORY_MAX_UPLOAD_MB")
+        importlib.reload(app_module)
+        deps.reset_stores()
+
+
+def test_a_decompression_bomb_is_refused_before_it_is_decoded(tmp_path, monkeypatch):
+    """A 15000x15000 PNG is a few KB on disk and 675 MB once decoded. The
+    thumbnail route decoded whatever it was given; it now reads the size from
+    the header and refuses before decoding."""
+    pytest.importorskip("fastapi")
+    import importlib
+    import io
+    import zipfile
+
+    from fastapi.testclient import TestClient
+    from PIL import Image as PILImage
+
+    from data_factory.core import imaging
+
+    monkeypatch.setenv("DATAFACTORY_WORKSPACE", str(tmp_path / "ws"))
+    monkeypatch.delenv("DATAFACTORY_API_KEY", raising=False)
+    from data_factory.service import app as app_module
+    from data_factory.service import deps
+
+    deps.reset_stores()
+    importlib.reload(app_module)
+
+    bomb = io.BytesIO()
+    PILImage.new("1", (15000, 15000)).save(bomb, "PNG")
+    archive = io.BytesIO()
+    with zipfile.ZipFile(archive, "w") as bundle:
+        bundle.writestr("bomb.png", bomb.getvalue())
+
+    decoded = []
+    monkeypatch.setattr(imaging, "load", lambda *a, **k: decoded.append(1))
+    monkeypatch.setattr(imaging, "load_reduced", lambda *a, **k: decoded.append(1), raising=False)
+    try:
+        with TestClient(app_module.app) as client:
+            dataset = client.post(
+                "/api/datasets", files={"file": ("d.zip", archive.getvalue(), "application/zip")}
+            ).json()["id"]
+            project = client.post(
+                f"/api/datasets/{dataset}/promote", json={"import_annotations": False}
+            ).json()["id"]
+            image = client.get(f"/api/projects/{project}/images").json()["images"][0]["id"]
+            response = client.get(f"/api/projects/{project}/images/{image}/thumb")
+        assert response.status_code == 413
+        assert decoded == []
+    finally:
+        deps.reset_stores()

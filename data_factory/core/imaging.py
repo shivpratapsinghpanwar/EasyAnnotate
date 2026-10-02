@@ -119,6 +119,39 @@ def load(path: Path) -> np.ndarray:
     return image
 
 
+_REDUCED = {
+    1: cv2.IMREAD_COLOR,
+    2: cv2.IMREAD_REDUCED_COLOR_2,
+    4: cv2.IMREAD_REDUCED_COLOR_4,
+    8: cv2.IMREAD_REDUCED_COLOR_8,
+}
+
+
+def load_reduced(path: Path, factor: int) -> np.ndarray:
+    """Decode at 1/``factor`` scale (1, 2, 4 or 8), orientation applied.
+
+    For JPEG the reduction happens inside the decoder, so a 50 MP photo
+    becomes a thumbnail without ever existing as a 150 MB array -- faster,
+    and the difference between a preview and an out-of-memory server.
+    """
+    data = np.fromfile(str(path), dtype=np.uint8)
+    if data.size == 0:
+        raise OSError(f"empty file: {path}")
+    image = cv2.imdecode(data, _REDUCED.get(int(factor), cv2.IMREAD_COLOR))
+    if image is None:
+        raise OSError(f"not a decodable image: {path}")
+    return image
+
+
+def reduction_for(width: int, height: int, edge: int) -> int:
+    """The largest decode reduction that still leaves ``edge`` pixels."""
+    longest = max(int(width), int(height))
+    for factor in (8, 4, 2):
+        if longest // factor >= edge:
+            return factor
+    return 1
+
+
 def encode(image: np.ndarray, suffix: str, *, quality: int = 95) -> bytes:
     """Compress to bytes without touching the disk.
 

@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from starlette.concurrency import run_in_threadpool
 
 from ...annotate import projects as projects_mod
 from ...annotate import review
@@ -81,7 +82,7 @@ async def import_predictions(
             sandbox = Workspace(holding / "unpacked")
             target = sandbox.root / "run"
             try:
-                extract_zip(payload, target, workspace=sandbox)
+                await run_in_threadpool(extract_zip, payload, target, workspace=sandbox)
             except WorkspaceError as exc:
                 raise HTTPException(400, str(exc)) from None
             source = target
@@ -89,7 +90,10 @@ async def import_predictions(
             source = payload
 
         try:
-            report = review.import_predictions(
+            # Off the event loop: matching and saving thousands of images is
+            # seconds of work that would otherwise stall every other request.
+            report = await run_in_threadpool(
+                review.import_predictions,
                 store,
                 project,
                 source,
