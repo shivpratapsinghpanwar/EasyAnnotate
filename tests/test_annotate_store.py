@@ -168,7 +168,9 @@ def test_a_retired_name_can_be_used_again_as_a_new_index(store, project):
     labels.retire(store, project, 0)
     again = labels.ensure(store, project, "Open")
     assert again.idx == 1
-    assert labels.class_list(store, project) == ["Open", "Open"]
+    # Two indices, never two identical names: writers map shapes to indices by
+    # name, and a duplicate silently merged the retired class into the new one.
+    assert labels.class_list(store, project) == ["Open__retired_0", "Open"]
 
 
 def test_restoring_a_retired_label_is_refused_if_the_name_was_reused(store, project):

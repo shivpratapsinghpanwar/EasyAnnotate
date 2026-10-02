@@ -112,8 +112,10 @@ def _name_map(store: Store, project: Project) -> dict[int, str]:
     }
 
 
-def listing(store: Store, project: Project, image: Image) -> list[StoredShape]:
-    names = _name_map(store, project)
+def listing(
+    store: Store, project: Project, image: Image, *, names: dict[int, str] | None = None
+) -> list[StoredShape]:
+    names = names if names is not None else _name_map(store, project)
     rows = store.query(
         "SELECT * FROM shape WHERE image_id = ? ORDER BY created_at, id", (image.id,)
     )
@@ -126,7 +128,13 @@ def annotation_for(store: Store, project: Project, image: Image) -> Annotation:
         filename=image.name,
         width=image.width,
         height=image.height,
-        shapes=[s.shape for s in listing(store, project, image)],
+        # Export names, which are unique: the writers map shapes to class
+        # indices by name, and a retired class sharing a live one's name
+        # would otherwise be merged into it in the output.
+        shapes=[
+            s.shape
+            for s in listing(store, project, image, names=labels_mod.export_names(store, project))
+        ],
     )
 
 
@@ -179,10 +187,16 @@ def save(
     # Labels first, outside the shape transaction. `ensure` takes the write
     # lock itself, and creating a label is a legitimate side effect of a save
     # even when the geometry turns out to be a no-op.
+    #
+    # Only names that *changed* are resolved. The editor sends names, not
+    # indices, and re-resolving an untouched shape's name would move every
+    # shape of a retired class into the live class sharing its name -- or
+    # recreate the class -- on the next autosave of its image.
     created: list[str] = []
     idx_for: dict[str, int] = {}
-    for _, shape in incoming:
-        if shape.label in idx_for:
+    before_edit = {s.id: s for s in listing(store, project, image)}
+    for shape_id, shape in incoming:
+        if shape.label in idx_for or _keeps_class(before_edit.get(shape_id), shape):
             continue
         before = labels_mod.by_name(store, project, shape.label)
         label = labels_mod.ensure(store, project, shape.label)
@@ -217,9 +231,15 @@ def save(
             # off the edge of the image, and every format writer downstream
             # assumes coordinates are inside the picture.
             shape = raw.clamped(image.width, image.height) if image.width and image.height else raw
-            label_idx = idx_for[shape.label] if shape.label in idx_for else idx_for[
-                labels_mod.clean_name(shape.label)
-            ]
+            before = existing.get(shape_id) if shape_id else None
+            if _keeps_class(before, shape):
+                label_idx = before.label_idx
+            elif shape.label in idx_for or labels_mod.clean_name(shape.label) in idx_for:
+                label_idx = idx_for.get(shape.label, idx_for.get(labels_mod.clean_name(shape.label)))
+            else:
+                # Its class changed between the read above and this lock:
+                # another save got in. Ask the client to reload, never guess.
+                raise _moved_on(base_version, image.version)
             polygon = (
                 json.dumps([[int(x), int(y)] for x, y in shape.polygon])
                 if shape.polygon
@@ -283,6 +303,11 @@ def save(
     image.version = result.version
     image.state = state
     return result
+
+
+def _keeps_class(before: StoredShape | None, shape: Shape) -> bool:
+    """An existing shape submitted under the name it already had."""
+    return before is not None and before.shape.label == shape.label
 
 
 def _moved_on(had: int | None, now: int | None) -> Conflict:

@@ -253,3 +253,28 @@ def test_imported_predictions_reach_an_attached_folder_as_scored_boxes(store, tm
 
     scores = [o.findtext("score") for o in ET.parse(folder / "a0.xml").getroot().iter("object")]
     assert sorted(s is not None for s in scores) == [False, True]
+
+
+# ------------------------------------------- retired names never merge classes
+
+
+def test_a_retired_class_sharing_a_live_name_exports_as_its_own_class(store, tmp_path):
+    """Retire 'Open', start a new 'Open': two indices, one name. Writers map
+    by name, so the retired class's shapes were exported as the new one."""
+    from data_factory.core.ops import annotate_export  # noqa: F401  (registers the op)
+
+    project = projects.create(store, "Doors")
+    image = images.add(store, project, "a.jpg", width=100, height=100)
+    shapes.replace_all(store, project, image, [Shape(label="Open", bbox=(1, 1, 20, 20))])
+    labels.retire(store, project, 0)
+    shapes.save(
+        store, project, images.get(store, project, image.id),
+        [(s.id, s.shape) for s in shapes.listing(store, project, image)]
+        + [(None, Shape(label="Open", bbox=(40, 40, 60, 60)))],
+    )
+
+    order = labels.class_list(store, project)
+    assert len(set(order)) == len(order) == 2
+    exported = shapes.annotation_for(store, project, images.get(store, project, image.id))
+    by_box = {s.bbox: order.index(s.label) for s in exported.shapes}
+    assert by_box == {(1, 1, 20, 20): 0, (40, 40, 60, 60): 1}

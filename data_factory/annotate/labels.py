@@ -318,14 +318,37 @@ def class_list(store: Store, project: Project) -> list[str]:
     A gap can only appear in a database edited by hand, but filling it costs
     one branch and turns a silent mislabelling into a visible placeholder.
     """
-    rows = store.query(
-        "SELECT idx, name FROM label WHERE project_id = ? ORDER BY idx", (project.id,)
-    )
-    if not rows:
+    names = export_names(store, project)
+    if not names:
         return []
-    names = {int(r["idx"]): str(r["name"]) for r in rows}
     highest = max(names)
     return [names.get(i, f"_unused_{i}") for i in range(highest + 1)]
+
+
+def export_names(store: Store, project: Project) -> dict[int, str]:
+    """Index -> the name written into exported files. **Unique, always.**
+
+    Names are unique among live labels only, so a retired class can share its
+    name with a live one -- by renaming, or by reusing the name, which is
+    allowed on purpose. Writers map shapes to indices *by name*, so a shared
+    name silently merged the retired class's shapes into the live one. Live
+    labels keep their names; a retired label whose name is already taken is
+    written as ``name__retired_<idx>``, visibly and reversibly distinct.
+    """
+    rows = store.query(
+        "SELECT idx, name, retired_at FROM label WHERE project_id = ?"
+        " ORDER BY (retired_at IS NOT NULL), idx",
+        (project.id,),
+    )
+    out: dict[int, str] = {}
+    taken: set[str] = set()
+    for row in rows:
+        idx, name = int(row["idx"]), str(row["name"])
+        if name in taken:
+            name = f"{name}__retired_{idx}"
+        taken.add(name)
+        out[idx] = name
+    return out
 
 
 def adopt(store: Store, project: Project, names: list[str]) -> list[Label]:
