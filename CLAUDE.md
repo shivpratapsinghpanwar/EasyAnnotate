@@ -32,7 +32,12 @@ the first box. Removing that is the entire product argument.
 
 ## State
 
-**Phases 0–4 of `docs/PLAN.md` are done.** 621 tests pass, all pushed.
+**Phases 0–4 of `docs/PLAN.md` are done, and M0 ("trust") of
+`docs/ROADMAP.md`.** 637 tests pass, including 13 browser tests (install
+playwright to run them). **The roadmap is the plan of record now** — a scored
+path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
+
+Commits carry the owner's name only: never a Claude co-author line.
 
 Working today: format conversion between 5 formats; cleaning; annotation-aware
 geometry; analysis; a sandboxed HTTP service; the **annotation editor** (boxes,
@@ -84,7 +89,7 @@ index, retiring keeps the slot, new classes append. It used to be
 .\.venv\Scripts\activate
 datafactory serve                 # http://localhost:8765
 datafactory annotate <folder>     # edit a folder's labels in place
-python -m pytest                  # 621; 10 browser tests skip without playwright
+python -m pytest                  # 637; 13 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3

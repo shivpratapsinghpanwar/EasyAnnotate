@@ -44,7 +44,10 @@ Then ship — a product nobody can install scores 1 on maturity forever, and rea
 users will re-rank everything after this point. Then AI assist and the loop,
 which are the bulk of the points.
 
-### M0 — Trust: nothing is lost, nothing is wrong *(correctness 8→9, perf 5→6)*
+### M0 — Trust: nothing is lost, nothing is wrong *(correctness 8→9, perf 5→6)* — **done**
+
+Every item below landed with a test in `tests/test_trust.py` that failed first.
+Docker (item 6) is fixed by configuration and a test, but has not been run.
 
 1. Save race: version check and the existing-shape read happen outside the
    write lock (`annotate/shapes.py`). Check inside `BEGIN IMMEDIATE`, and
