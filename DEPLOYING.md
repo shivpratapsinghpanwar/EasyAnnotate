@@ -56,7 +56,7 @@ payoff for keeping SAM in an optional extra.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `DATAFACTORY_WORKSPACE` | `~/.datafactory/workspaces` | where uploads live |
+| `DATAFACTORY_WORKSPACE` | `~/.datafactory/workspaces` | where uploads live. The annotation database and project media go in its **parent**, so keep it one level inside your volume (the image uses `/data/workspaces`) |
 | `DATAFACTORY_TTL_HOURS` | `24` | how long an anonymous dataset survives |
 | `DATAFACTORY_API_KEY` | *(unset)* | if set, `/api/*` requires `X-API-Key` |
 | `DATAFACTORY_ORIGINS` | *(unset)* | comma-separated CORS origins |

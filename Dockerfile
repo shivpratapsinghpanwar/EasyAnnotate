@@ -37,7 +37,7 @@ RUN useradd --create-home --uid 10001 datafactory
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    DATAFACTORY_WORKSPACE=/data \
+    DATAFACTORY_WORKSPACE=/data/workspaces \
     PIP_NO_CACHE_DIR=1
 
 COPY --from=build /dist/*.whl /tmp/dist/
@@ -52,7 +52,10 @@ RUN WHEEL="$(ls /tmp/dist/*.whl)" \
  && rm -rf /tmp/dist
 
 # A named volume belongs here: uploads are large, and a container filesystem
-# is the wrong place to accumulate them.
+# is the wrong place to accumulate them. The workspace is a *subfolder* of the
+# volume because the annotation database and project media live beside it, in
+# its parent -- with the workspace at /data they landed in /, outside the
+# volume, unwritable by this user, and gone on every restart.
 RUN mkdir -p /data && chown datafactory:datafactory /data
 VOLUME ["/data"]
 

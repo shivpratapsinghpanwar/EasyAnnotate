@@ -6,7 +6,9 @@ annotation work without saying so, and failed before its fix.
 
 from __future__ import annotations
 
+import re
 import sqlite3
+from pathlib import Path
 
 import pytest
 
@@ -278,3 +280,20 @@ def test_a_retired_class_sharing_a_live_name_exports_as_its_own_class(store, tmp
     exported = shapes.annotation_for(store, project, images.get(store, project, image.id))
     by_box = {s.bbox: order.index(s.label) for s in exported.shapes}
     assert by_box == {(1, 1, 20, 20): 0, (40, 40, 60, 60): 1}
+
+
+# ---------------------------------------------------------------- deployment
+
+
+def test_the_docker_image_keeps_the_database_inside_its_volume():
+    """The workspace was /data, so data_root() -- its parent -- was /. The
+    database and every project went outside the volume and were lost on
+    restart. Checked from the Dockerfile, since CI may have no Docker."""
+    from pathlib import PurePosixPath
+
+    dockerfile = (Path(__file__).parent.parent / "Dockerfile").read_text(encoding="utf-8")
+    workspace = re.search(r"DATAFACTORY_WORKSPACE=(\S+)", dockerfile).group(1)
+    volumes = re.findall(r'VOLUME \["([^"]+)"\]', dockerfile)
+
+    data_root = PurePosixPath(workspace).parent
+    assert any(data_root == PurePosixPath(v) or PurePosixPath(v) in data_root.parents for v in volumes)
