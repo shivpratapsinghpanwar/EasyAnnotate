@@ -128,6 +128,11 @@ class Store:
             conn = self.connection
             try:
                 with conn:
+                    # IMMEDIATE takes SQLite's write lock now rather than at
+                    # the first INSERT, so a read-check-write inside this
+                    # block is atomic -- across processes too: the CLI and the
+                    # server open the same file.
+                    conn.execute("BEGIN IMMEDIATE")
                     yield conn
             except sqlite3.IntegrityError as exc:
                 raise StoreError(str(exc)) from exc
@@ -157,19 +162,35 @@ class Store:
         if version == SCHEMA_VERSION:
             return
         with self._write_lock:
-            with conn:
-                for rung in range(version, SCHEMA_VERSION):
-                    MIGRATIONS[rung](conn)
-                # PRAGMA does not take a parameter, and the value is an int
-                # constant of ours -- never anything from outside.
-                conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
+            # One transaction per rung, with the version bump inside it. A
+            # crash mid-ladder then leaves a database at a real version that
+            # the next start resumes from, never a half-built schema that
+            # claims to be the old one.
+            for rung in range(version, SCHEMA_VERSION):
+                MIGRATIONS[rung](conn, rung + 1)
 
 
-def _to_v1(conn: sqlite3.Connection) -> None:
-    conn.executescript(SCHEMA_FILE.read_text(encoding="utf-8"))
+def _step(conn: sqlite3.Connection, target: int, *statements: str) -> None:
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        for statement in statements:
+            conn.execute(statement)
+        # PRAGMA does not take a parameter, and the value is an int constant
+        # of ours -- never anything from outside.
+        conn.execute(f"PRAGMA user_version={int(target)}")
 
 
-def _to_v2(conn: sqlite3.Connection) -> None:
+def _to_v1(conn: sqlite3.Connection, target: int) -> None:
+    # executescript commits whatever is open and then runs the text as given,
+    # so the transaction has to be part of the script itself.
+    conn.executescript(
+        "BEGIN IMMEDIATE;\n"
+        + SCHEMA_FILE.read_text(encoding="utf-8")
+        + f"\nPRAGMA user_version={int(target)};\nCOMMIT;"
+    )
+
+
+def _to_v2(conn: sqlite3.Connection, target: int) -> None:
     """Record which sidecar format an attached project writes back to.
 
     Deliberately *not* added to ``schema.sql``. Keeping the base script at
@@ -177,12 +198,10 @@ def _to_v2(conn: sqlite3.Connection) -> None:
     migration is exercised on every new install rather than only on the one
     upgrade nobody tested.
     """
-    conn.execute(
-        "ALTER TABLE project ADD COLUMN sidecar_format TEXT NOT NULL DEFAULT ''"
-    )
+    _step(conn, target, "ALTER TABLE project ADD COLUMN sidecar_format TEXT NOT NULL DEFAULT ''")
 
 
-def _to_v3(conn: sqlite3.Connection) -> None:
+def _to_v3(conn: sqlite3.Connection, target: int) -> None:
     """Remember how many shapes a model predicted for each image.
 
     Without it the agreement metric is quietly wrong in the most common case.
@@ -191,7 +210,7 @@ def _to_v3(conn: sqlite3.Connection) -> None:
     would count every deletion as though the prediction had never been made,
     and a model that hallucinated ten boxes an image would score 100%.
     """
-    conn.execute("ALTER TABLE image ADD COLUMN predicted_count INTEGER NOT NULL DEFAULT 0")
+    _step(conn, target, "ALTER TABLE image ADD COLUMN predicted_count INTEGER NOT NULL DEFAULT 0")
 
 
 #: Rung *n* migrates a database at version *n* to version *n+1*.

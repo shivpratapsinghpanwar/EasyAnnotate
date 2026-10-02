@@ -174,10 +174,7 @@ def save(
         raise StoreError(f"origin must be one of {', '.join(ORIGINS)}")
 
     if base_version is not None and int(base_version) != image.version:
-        raise Conflict(
-            f"this image moved on (you had version {base_version}, it is now "
-            f"{image.version}). Reload and reapply your change."
-        )
+        raise _moved_on(base_version, image.version)
 
     # Labels first, outside the shape transaction. `ensure` takes the write
     # lock itself, and creating a label is a legitimate side effect of a save
@@ -195,12 +192,26 @@ def save(
         if before is None:
             created.append(label.name)
 
-    existing = {s.id: s for s in listing(store, project, image)}
     seen: set[str] = set()
     now = time.time()
-    result = SaveResult(version=image.version, labels_created=created)
 
     with store.write() as conn:
+        # Check and read again *inside* the transaction. The check above is
+        # only a fast path: between it and here another save -- a second tab,
+        # or an autosave racing a navigate-flush -- can commit, and a diff
+        # computed against what it replaced would resurrect deleted shapes or
+        # drop new ones without anyone being told.
+        row = conn.execute(
+            "SELECT version, state FROM image WHERE id = ?", (image.id,)
+        ).fetchone()
+        if row is None:
+            raise StoreError("that image no longer exists")
+        image.version, image.state = int(row["version"]), row["state"]
+        if base_version is not None and int(base_version) != image.version:
+            raise _moved_on(base_version, image.version)
+        existing = {s.id: s for s in listing(store, project, image)}
+        result = SaveResult(version=image.version, labels_created=created)
+
         for shape_id, raw in incoming:
             # Server-side clamping, always. A browser can send a box dragged
             # off the edge of the image, and every format writer downstream
@@ -260,15 +271,26 @@ def save(
         state = image.state
         if advance_state and state in ("todo", "predicted"):
             state = "in_progress"
-        conn.execute(
-            "UPDATE image SET version = ?, state = ?, updated_at = ? WHERE id = ?",
-            (result.version, state, now, image.id),
+        updated = conn.execute(
+            "UPDATE image SET version = ?, state = ?, updated_at = ?"
+            " WHERE id = ? AND version = ?",
+            (result.version, state, now, image.id, image.version),
         )
+        if updated.rowcount != 1:  # unreachable under the write lock; kept as the backstop
+            raise _moved_on(image.version, None)
         touch(conn, project.id)
 
     image.version = result.version
     image.state = state
     return result
+
+
+def _moved_on(had: int | None, now: int | None) -> Conflict:
+    current = "" if now is None else f", it is now {now}"
+    return Conflict(
+        f"this image moved on (you had version {had}{current}). "
+        "Reload and reapply your change."
+    )
 
 
 def replace_all(

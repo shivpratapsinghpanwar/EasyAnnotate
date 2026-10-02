@@ -17,11 +17,13 @@ from __future__ import annotations
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
-from pathlib import PurePosixPath
-from typing import Any
+from pathlib import Path, PurePosixPath
+from typing import Any, TypeVar
 
 from .projects import Project, touch
 from .store import NotFound, Store, StoreError, new_id, require_id
+
+T = TypeVar("T")
 
 #: todo        nothing has happened to it yet
 #: predicted   a model wrote shapes onto it, nobody has looked
@@ -204,20 +206,107 @@ def by_path(store: Store, project: Project, rel_path: str) -> Image | None:
     return _row(row) if row else None
 
 
-def by_stem(store: Store, project: Project) -> dict[str, Image]:
-    """Every image keyed by filename stem.
+def listing_all(store: Store, project: Project) -> list[Image]:
+    """Every image in the project, in order. For import-time matching."""
+    return [
+        _row(row)
+        for row in store.query(
+            "SELECT * FROM image WHERE project_id = ? ORDER BY seq", (project.id,)
+        )
+    ]
 
-    Prediction import matches on stem, and it must be able to report what it
-    could *not* match: silently importing zero shapes because the names did not
-    line up is the dominant failure mode of every tool that does this.
+
+class Matcher:
+    """Which project image does a label file belong to?
+
+    By path first, and by bare filename stem only when that stem settles it.
+    ``train/001.jpg`` and ``val/001.jpg`` share a stem; matching on it alone
+    gave both images whichever label came first, and in attached mode the
+    next save wrote that image's boxes into the other one's file on disk.
+
+    When several images share the stem, the one sharing the most trailing
+    folders wins -- so ``labels/val/001.txt`` still finds
+    ``images/val/001.jpg`` -- and a tie is *ambiguous*: recorded in
+    :attr:`ambiguous` for the caller to report, never guessed.
     """
-    out: dict[str, Image] = {}
-    for row in store.query(
-        "SELECT * FROM image WHERE project_id = ? ORDER BY seq", (project.id,)
-    ):
-        image = _row(row)
-        out.setdefault(image.stem, image)
-    return out
+
+    def __init__(self, images: Iterable[Image]) -> None:
+        self._by_stem: dict[str, list[Image]] = {}
+        for image in images:
+            self._by_stem.setdefault(image.stem, []).append(image)
+        self.ambiguous: set[str] = set()
+
+    def find(self, name: str) -> Image | None:
+        """``name`` is a bare filename or a relative path, extension optional."""
+        parts = _match_parts(name)
+        if not parts:
+            return None
+        candidates = self._by_stem.get(parts[-1], [])
+        if len(candidates) <= 1:
+            return candidates[0] if candidates else None
+        scored = sorted(
+            ((_shared_tail(parts, _match_parts(c.rel_path)), c) for c in candidates),
+            key=lambda pair: pair[0],
+            reverse=True,
+        )
+        best, runner_up = scored[0][0], scored[1][0]
+        if best > 1 and best > runner_up:
+            return scored[0][1]
+        self.ambiguous.add(name)
+        return None
+
+
+def assign(images: Iterable[Image], named: Iterable[tuple[str, T]]) -> tuple[dict[str, T], list[str]]:
+    """Pair each ``(name, value)`` with the image it belongs to.
+
+    Returns ``{image id: value}`` and the names that could not be placed
+    safely -- ambiguous, or a second claim on an image already taken. Those
+    are for the caller to report; placing them anyway is how one image's
+    labels end up on another.
+    """
+    matcher = Matcher(images)
+    placed: dict[str, T] = {}
+    unsure: list[str] = []
+    for name, value in named:
+        image = matcher.find(name)
+        if image is None:
+            if name in matcher.ambiguous:
+                unsure.append(name)
+            continue
+        if image.id in placed:
+            unsure.append(name)
+            continue
+        placed[image.id] = value
+    return placed, unsure
+
+
+def item_name(item: Any, root: Path) -> str:
+    """The best name a dataset item has for matching: its image's path
+    relative to ``root`` when it has one, else the filename it records."""
+    image = getattr(item, "image", None)
+    if image is not None:
+        try:
+            return Path(image).resolve().relative_to(Path(root).resolve()).as_posix()
+        except ValueError:
+            pass
+    return item.annotation.filename
+
+
+def _match_parts(name: str) -> list[str]:
+    path = PurePosixPath(str(name).replace("\\", "/"))
+    parts = [p for p in path.parts if p not in ("", ".", "/")]
+    if parts:
+        parts[-1] = PurePosixPath(parts[-1]).stem
+    return parts
+
+
+def _shared_tail(a: list[str], b: list[str]) -> int:
+    count = 0
+    for x, y in zip(reversed(a), reversed(b)):
+        if x != y:
+            break
+        count += 1
+    return count
 
 
 def listing(

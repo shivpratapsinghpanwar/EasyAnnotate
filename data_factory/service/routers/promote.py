@@ -19,7 +19,6 @@ whole review layer rests on, applied at the door.
 from __future__ import annotations
 
 import shutil
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -100,10 +99,6 @@ def promote(
     elif yolo.find_data_yaml(source) is not None:
         warnings.append("a data.yaml was present but its class list could not be read")
 
-    by_stem = {}
-    if loaded is not None:
-        for item in loaded.items:
-            by_stem.setdefault(item.stem, item.annotation)
 
     copied = 0
     registered: list[tuple[str, int, int]] = []
@@ -126,11 +121,23 @@ def promote(
 
     made = images_mod.add_many(store, project, registered)
 
+    # Match labels to images by path; a bare stem only when it is unique.
+    found: dict = {}
+    if loaded is not None:
+        found, unsure = images_mod.assign(
+            made, ((images_mod.item_name(item, source), item.annotation) for item in loaded.items)
+        )
+        if unsure:
+            warnings.append(
+                f"{len(unsure)} label file(s) could belong to more than one image and "
+                f"were not imported, for example: {', '.join(unsure[:5])}"
+            )
+
     imported_shapes = 0
     predicted = 0
     reviewed = 0
     for image in made:
-        annotation = by_stem.get(Path(image.rel_path).stem)
+        annotation = found.get(image.id)
         if annotation is None or not annotation.shapes:
             continue
         # A score means a detector produced it. No score means a person did.

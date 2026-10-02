@@ -33,7 +33,7 @@ from typing import Any
 
 from ..core import fs, imaging
 from ..core.annotations import formats, labelme, voc, yolo
-from ..core.annotations.model import Annotation, AnnotationError
+from ..core.annotations.model import AnnotationError
 from ..core.types import Context
 from . import images as images_mod
 from . import labels as labels_mod
@@ -301,14 +301,21 @@ def _import_existing(
         except StoreError as exc:
             notes.append(f"could not adopt the existing class order: {exc}")
 
-    by_stem: dict[str, Annotation] = {}
-    for item in dataset.items:
-        by_stem.setdefault(item.stem, item.annotation)
+    # By path, not bare stem: train/001 and val/001 are different images, and
+    # in this mode a wrong match is written back into the user's own files.
+    found, unsure = images_mod.assign(
+        registered, ((images_mod.item_name(item, root), item.annotation) for item in dataset.items)
+    )
+    if unsure:
+        notes.append(
+            f"{len(unsure)} label file(s) could belong to more than one image and "
+            f"were not imported, for example: {', '.join(unsure[:5])}"
+        )
 
     imported = 0
     matched = 0
     for image in registered:
-        annotation = by_stem.get(Path(image.rel_path).stem)
+        annotation = found.get(image.id)
         if annotation is None or not annotation.shapes:
             continue
         from_model = any(s.confidence is not None for s in annotation.shapes)

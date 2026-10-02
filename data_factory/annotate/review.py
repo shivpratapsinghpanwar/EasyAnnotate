@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -52,6 +53,7 @@ def read_predictions(
     *,
     project_classes: list[str] | None = None,
     sizes: dict[str, tuple[int, int]] | None = None,
+    locate: Callable[[str], Any] | None = None,
 ) -> tuple[list[Annotation], list[str]]:
     """Read a folder or file of model output into annotations.
 
@@ -67,7 +69,9 @@ def read_predictions(
     from the project. It is needed because **a prediction folder has no images
     in it** -- an inference run writes labels, not pictures -- and YOLO
     coordinates are normalised, so without the size there is nothing to
-    multiply by. The ordinary dataset reader pairs labels with images and
+    multiply by. ``locate``, when given, resolves a label file's relative
+    path to the project image (anything with ``width``/``height``) and is
+    preferred over ``sizes``, which can only key on the stem. The ordinary dataset reader pairs labels with images and
     therefore cannot read this at all; that is why it is not simply reused.
     """
     notes: list[str] = []
@@ -100,7 +104,7 @@ def read_predictions(
 
     label_files = [p for p in sorted(source.rglob("*.txt")) if p.is_file()]
     if label_files:
-        return _read_yolo_labels(source, label_files, project_classes, sizes, notes)
+        return _read_yolo_labels(source, label_files, project_classes, sizes, notes, locate)
 
     try:
         dataset = formats.read_dataset(source, "auto", recursive=True)
@@ -118,6 +122,7 @@ def _read_yolo_labels(
     project_classes: list[str] | None,
     sizes: dict[str, tuple[int, int]],
     notes: list[str],
+    locate: Callable[[str], Any] | None = None,
 ) -> tuple[list[Annotation], list[str]]:
     """Read a folder of bare YOLO ``.txt`` predictions.
 
@@ -149,16 +154,25 @@ def _read_yolo_labels(
     unmeasured = 0
     for path in label_files:
         stem = path.stem
-        width, height = sizes.get(stem, (0, 0))
+        # The relative path, not the stem, names the prediction: it is what
+        # tells val/001.txt from train/001.txt when matching it to an image.
+        name = path.relative_to(source).as_posix()
+        if locate is not None:
+            image = locate(name)
+            known = image is not None
+            width, height = (image.width, image.height) if known else (0, 0)
+        else:
+            known = stem in sizes
+            width, height = sizes.get(stem, (0, 0))
 
-        if stem not in sizes:
+        if not known:
             # This file matches no image in the project. It still has to appear
             # in the result, empty, so the caller can *report* it as unmatched
             # -- dropping it here would turn "your filenames do not line up"
             # into "no predictions were found", which sends people looking in
             # entirely the wrong place.
             annotations.append(
-                Annotation(filename=f"{stem}.jpg", width=0, height=0, shapes=[])
+                Annotation(filename=name, width=0, height=0, shapes=[])
             )
             continue
 
@@ -171,7 +185,7 @@ def _read_yolo_labels(
 
         try:
             annotations.append(
-                yolo.read(path, classes, width, height, filename=f"{stem}.jpg")
+                yolo.read(path, classes, width, height, filename=name)
             )
         except AnnotationError as exc:
             notes.append(f"{path.name}: {exc}")
@@ -242,13 +256,14 @@ def import_predictions(
     one that did *not* match.
     """
     class_list = labels_mod.class_list(store, project)
-    by_stem = images_mod.by_stem(store, project)
+    every_image = images_mod.listing_all(store, project)
     # A prediction folder holds labels, not images, so the sizes YOLO needs to
-    # denormalise its coordinates have to come from the project.
-    sizes = {stem: (image.width, image.height) for stem, image in by_stem.items()}
+    # denormalise its coordinates have to come from the project -- found by
+    # the same matcher that later attaches the shapes, so the two agree.
+    matcher = images_mod.Matcher(every_image)
 
     annotations, notes = read_predictions(
-        source, project_classes=class_list, sizes=sizes
+        source, project_classes=class_list, locate=matcher.find
     )
     if not annotations:
         raise ReviewError(
@@ -262,12 +277,19 @@ def import_predictions(
     dropped_low = 0
     touched: list[images_mod.Image] = []
 
+    claimed: set[str] = set()
     for annotation in annotations:
-        stem = Path(annotation.filename).stem
-        image = by_stem.get(stem)
+        image = matcher.find(annotation.filename)
         if image is None:
-            unmatched_files.append(annotation.filename)
+            if annotation.filename not in matcher.ambiguous:
+                unmatched_files.append(annotation.filename)
             continue
+        if image.id in claimed:
+            # Two prediction files resolved to one image. Applying both would
+            # let the second silently replace the first.
+            matcher.ambiguous.add(annotation.filename)
+            continue
+        claimed.add(image.id)
         if image.state in PROTECTED_STATES and not overwrite_reviewed:
             skipped_reviewed += 1
             continue
@@ -304,7 +326,15 @@ def import_predictions(
         )
         projects_mod.touch(conn, project.id)
 
-    unmatched_images = len(by_stem) - matched - skipped_reviewed
+    unmatched_images = len(every_image) - matched - skipped_reviewed
+    if matcher.ambiguous:
+        sample = ", ".join(sorted(matcher.ambiguous)[:5])
+        notes.append(
+            f"{len(matcher.ambiguous)} prediction file(s) could belong to more than "
+            f"one image (several images share the filename) and were not applied, "
+            f"for example: {sample}. Keep the folder structure in the predictions "
+            f"so each one names its image."
+        )
     if unmatched_files:
         notes.append(
             f"{len(unmatched_files)} prediction file(s) matched no image, "
@@ -312,8 +342,8 @@ def import_predictions(
         )
     if matched == 0:
         notes.append(
-            "nothing matched. Predictions are matched to images by filename "
-            "stem, so check that the names line up."
+            "nothing matched. Predictions are matched to images by path, then "
+            "by filename, so check that the names line up."
         )
     if skipped_reviewed:
         notes.append(
@@ -327,6 +357,7 @@ def import_predictions(
         "run_id": run_id,
         "matched": matched,
         "unmatched_files": len(unmatched_files),
+        "ambiguous_files": len(matcher.ambiguous),
         "unmatched_images": max(0, unmatched_images),
         "shapes_imported": imported,
         "skipped_reviewed": skipped_reviewed,
