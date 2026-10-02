@@ -105,3 +105,52 @@ export function mipFor(levels, displayWidth) {
   }
   return levels[0];
 }
+
+// Fetch, decode and mip an image without stalling the main thread: `decode()`
+// and `createImageBitmap` both run off it, which matters because this is also
+// how the next image is prefetched while somebody is mid-drag on this one.
+// Resolves to null on failure rather than rejecting -- a missing image is an
+// ordinary state the editor reports, not an exception.
+export async function decodePixels(url) {
+  const img = new Image();
+  img.src = url;
+  try {
+    await img.decode();
+  } catch {
+    return null;
+  }
+  let mips;
+  try {
+    mips = await buildMipsAsync(img);
+  } catch {
+    mips = buildMips(img);
+  }
+  return { mips, width: img.naturalWidth, height: img.naturalHeight };
+}
+
+async function buildMipsAsync(source) {
+  if (typeof createImageBitmap !== "function") return buildMips(source);
+  const levels = [source];
+  let width = source.naturalWidth || source.width;
+  let height = source.naturalHeight || source.height;
+  while (width > 64 && height > 64) {
+    width = Math.max(1, Math.floor(width / 2));
+    height = Math.max(1, Math.floor(height / 2));
+    levels.push(
+      await createImageBitmap(levels[levels.length - 1], {
+        resizeWidth: width,
+        resizeHeight: height,
+        resizeQuality: "high",
+      }),
+    );
+  }
+  return levels;
+}
+
+// Bitmaps hold GPU/native memory the garbage collector does not see; give it
+// back explicitly when an image leaves the cache.
+export function releaseMips(levels) {
+  for (const level of levels || []) {
+    if (typeof ImageBitmap !== "undefined" && level instanceof ImageBitmap) level.close();
+  }
+}

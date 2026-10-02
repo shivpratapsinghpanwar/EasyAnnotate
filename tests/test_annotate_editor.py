@@ -477,3 +477,109 @@ def test_the_status_never_claims_unsaved_when_nothing_changed(
     finally:
         page.close()
     assert not errors, errors
+
+
+def _shape_boxes(page):
+    return page.evaluate(
+        "window.__editor.scene.order.map(id => window.__editor.scene.get(id).bbox)"
+    )
+
+
+def test_undo_still_works_after_autosave_renames_the_shape(browser, service, bare_images):
+    """Autosave swaps a draft id for the server's. Undo must follow the rename.
+
+    The commands recorded the id the shape had when it was drawn; once the
+    save renamed it, Ctrl+Z on a move silently did nothing.
+    """
+    errors: list[str] = []
+    project = make_project(service, bare_images, "undo-reid")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        drag(page, 300, 240, 520, 420)
+        page.keyboard.type("Open")
+        page.keyboard.press("Enter")
+        page.wait_for_function("window.__editor.scene.order.length === 1")
+        drawn = _shape_boxes(page)
+
+        # Move it before the first autosave, so the move is recorded against
+        # the draft id -- then let the save rename the shape underneath it.
+        drag(page, 400, 330, 470, 390)
+        assert page.evaluate("window.__editor.scene.order[0]").startswith("draft-")
+        page.wait_for_timeout(900)
+        assert not page.evaluate("window.__editor.scene.order[0]").startswith("draft-")
+        assert _shape_boxes(page) != drawn
+
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(900)
+        assert _shape_boxes(page) == drawn
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_restored_shape_keeps_one_id(browser, service, bare_images):
+    """Undoing a delete re-sends an id the server no longer has.
+
+    The server inserts it under a fresh id. The client must adopt that id, or
+    every later save churns the shape into a new row and its history is lost.
+    """
+    errors: list[str] = []
+    project = make_project(service, bare_images, "restore")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        drag(page, 300, 240, 520, 420)
+        page.keyboard.type("Open")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(900)
+
+        page.keyboard.press("Delete")
+        page.wait_for_timeout(900)
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(900)
+
+        image_id = page.evaluate("window.__editor.scene.imageId")
+        with httpx.Client(base_url=service, timeout=30) as client:
+            stored = client.get(f"/api/projects/{project['id']}/images/{image_id}").json()
+        assert [s["id"] for s in stored["shapes"]] == page.evaluate(
+            "window.__editor.scene.order"
+        )
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_edits_made_during_a_slow_save_are_kept(browser, service, bare_images):
+    """A save still in flight when the next autosave fires.
+
+    Both used to carry the same base version: the second got a 409, and the
+    conflict path reloaded the server copy over the user's newest box.
+    """
+    errors: list[str] = []
+    project = make_project(service, bare_images, "slow")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        page.evaluate(
+            """() => {
+              const api = window.__editor.api;
+              const real = api.saveShapes.bind(api);
+              api.saveShapes = (...args) =>
+                new Promise((r) => setTimeout(r, 1500)).then(() => real(...args));
+            }"""
+        )
+        drag(page, 300, 240, 520, 420)
+        page.keyboard.type("Open")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(700)  # first save is now in flight
+        drag(page, 560, 250, 700, 400)
+        page.wait_for_timeout(6000)
+
+        assert page.evaluate("window.__editor.scene.order.length") == 2
+        assert page.inner_text("#status") == "saved"
+
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        page.wait_for_timeout(500)
+        assert page.evaluate("window.__editor.scene.order.length") == 2
+    finally:
+        page.close()
+    assert not errors, errors

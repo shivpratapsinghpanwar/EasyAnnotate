@@ -29,7 +29,11 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
   ctx.scale(view.scale, view.scale);
 
   if (mips && mips.length) {
-    const mip = mipFor(mips, view.width * view.scale);
+    // Pick by *device* pixels. Choosing by CSS pixels on a 2x screen draws
+    // from a mip at half the resolution the display can show -- every fine
+    // edge comes out soft, exactly where a tight box needs to see it.
+    const dpr = Math.min(globalThis.devicePixelRatio || 1, 2);
+    const mip = mipFor(mips, view.width * view.scale * dpr);
     if (mip.width === view.width) {
       ctx.imageSmoothingEnabled = false;
       ctx.drawImage(mip, 0, 0);

@@ -28,6 +28,14 @@ export class Scene {
     this.hover = null;
     this.dirty = true;
     this.changed = false;
+    // Bumped on every edit. A save compares it before and after the round
+    // trip: if it moved, the user kept working while the request was in
+    // flight, and "saved" would be a lie.
+    this.revision = 0;
+    // old id -> new id, for every shape the server renamed. Undo commands
+    // hold the id a shape had when they were recorded; without this, the
+    // first autosave after a drag would turn Ctrl+Z into a silent no-op.
+    this.aliases = new Map();
     this.imageId = null;
     this.version = 0;
     this.width = 0;
@@ -42,6 +50,7 @@ export class Scene {
   // `dirty`, which is only about pixels: panning is dirty but not changed, and
   // autosaving on a pan would be absurd.
   touch() {
+    this.revision += 1;
     this.changed = true;
     this.dirty = true;
   }
@@ -51,6 +60,7 @@ export class Scene {
     this.order = [];
     this.selection.clear();
     this.hover = null;
+    this.aliases.clear();
     this.imageId = payload.id;
     this.version = payload.version;
     this.width = payload.width;
@@ -82,7 +92,24 @@ export class Scene {
     return shape;
   }
 
+  // The current id of a shape known by any id it has ever had. A live id wins
+  // over an alias, so a shape re-inserted under its old id is still found.
+  resolve(id) {
+    let current = id;
+    for (let hops = 0; hops < 16 && !this.shapes.has(current); hops++) {
+      const next = this.aliases.get(current);
+      if (next === undefined) break;
+      current = next;
+    }
+    return current;
+  }
+
+  has(id) {
+    return this.shapes.has(this.resolve(id));
+  }
+
   remove(id) {
+    id = this.resolve(id);
     if (!this.shapes.has(id)) return null;
     const shape = this.shapes.get(id);
     this.shapes.delete(id);
@@ -104,7 +131,7 @@ export class Scene {
   }
 
   indexOf(id) {
-    return this.order.indexOf(id);
+    return this.order.indexOf(this.resolve(id));
   }
 
   // Give a shape the id the server assigned it, keeping its place, its
@@ -114,6 +141,7 @@ export class Scene {
   reid(oldId, newId) {
     const shape = this.shapes.get(oldId);
     if (!shape || oldId === newId) return;
+    this.aliases.set(oldId, newId);
     shape.id = newId;
     this.shapes.delete(oldId);
     this.shapes.set(newId, shape);
@@ -124,7 +152,7 @@ export class Scene {
   }
 
   get(id) {
-    return this.shapes.get(id);
+    return this.shapes.get(this.resolve(id));
   }
 
   select(id, { additive = false } = {}) {

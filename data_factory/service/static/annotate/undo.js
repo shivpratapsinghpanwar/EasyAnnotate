@@ -73,7 +73,7 @@ export function addShape(scene, shape) {
   return {
     label: "add shape",
     do: () => {
-      if (!scene.shapes.has(shape.id)) scene.insertAt(shape, scene.order.length);
+      if (!scene.has(shape.id)) scene.insertAt(shape, scene.order.length);
       scene.select(shape.id);
     },
     undo: () => scene.remove(shape.id),
@@ -128,7 +128,7 @@ export function addMany(scene, shapes) {
     label: "copy shapes",
     do: () => {
       for (const shape of copies) {
-        if (!scene.shapes.has(shape.id)) scene.insertAt(cloneShape(shape), scene.order.length);
+        if (!scene.has(shape.id)) scene.insertAt(cloneShape(shape), scene.order.length);
       }
     },
     undo: () => {

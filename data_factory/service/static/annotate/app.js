@@ -13,11 +13,12 @@
 import { Api, ApiError, Conflict } from "./api.js";
 import { Filmstrip } from "./filmstrip.js";
 import { LabelRail } from "./labels.js";
+import { hitTest } from "./hit.js";
 import { draw } from "./render.js";
-import { Scene, cloneShape, draftId, isDraft } from "./scene.js";
+import { Scene, cloneShape, draftId } from "./scene.js";
 import { AssistPanel } from "./assist.js";
 import { UndoStack, addMany, addShape, changeLabel, removeShape } from "./undo.js";
-import { Viewport, buildMips } from "./viewport.js";
+import { Viewport, decodePixels, releaseMips } from "./viewport.js";
 // tools/ are the *drawing* tools. assist.js is the panel for optional
 // model-backed helpers -- two different things that were both called
 // "tools" until the import block made the collision obvious.
@@ -26,6 +27,7 @@ import * as polygonTool from "./tools/polygon.js";
 import * as selectTool from "./tools/select.js";
 
 const SAVE_DELAY = 400;
+const PIXEL_CACHE = 3;
 
 class Editor {
   constructor() {
@@ -46,6 +48,8 @@ class Editor {
     this.images = [];
     this.image = null;
     this.mips = null;
+    this.pixelCache = new Map();
+    this.opening = 0;
     this.saveTimer = null;
     this.saving = null;
     this.pendingGeometry = null;
@@ -128,59 +132,89 @@ class Editor {
   }
 
   async openImage(imageId) {
+    // Holding N fires opens faster than they finish. Each takes a ticket and
+    // only the newest may touch the screen -- otherwise whichever request
+    // lands last wins, and one image's pixels sit under another's shapes.
+    const ticket = ++this.opening;
+
     // Never navigate away from unsaved work. This is the single most likely
     // place to lose an edit, so it is awaited rather than fired and forgotten.
     await this.flushSave();
+    if (ticket !== this.opening) return;
 
     let payload;
+    let pixels;
     try {
-      payload = await this.api.image(this.projectId, imageId);
+      // Shapes and pixels together, and the pixels are usually decoded
+      // already: the previous open prefetched its neighbours.
+      [payload, pixels] = await Promise.all([
+        this.api.image(this.projectId, imageId),
+        this.pixels(imageId),
+      ]);
     } catch (error) {
-      this.say(describe(error));
+      if (ticket === this.opening) this.say(describe(error));
       return;
     }
+    if (ticket !== this.opening) return;
 
+    // Everything below swaps in one go, so there is never a frame that shows
+    // the old picture with the new shapes.
     this.image = payload;
     this.scene.load(payload);
     this.undo.clear();
-    this.view.setImageSize(payload.width, payload.height);
+    this.pendingGeometry = null;
+    this.mips = pixels ? pixels.mips : null;
+    // The database is the authority on size, but if a row predates the EXIF
+    // work its dimensions could disagree with the pixels. Trust what decoded,
+    // or every box on this image is drawn in the wrong space.
+    if (pixels && pixels.width && pixels.height) {
+      this.scene.width = pixels.width;
+      this.scene.height = pixels.height;
+    }
+    this.view.setImageSize(this.scene.width, this.scene.height);
+    this.view.fit(this.canvas.getBoundingClientRect());
     this.strip.setCurrent(imageId);
     this.imageName.textContent = payload.name;
     this.setStatusDot("saved");
     this.cancelTool();
-
-    await this.loadPixels(imageId);
-    this.view.fit(this.canvas.getBoundingClientRect());
     this.updateReviewPanel(null);
     this.scene.invalidate();
-    this.say(`${payload.name} — ${payload.shapes.length} shape(s)`);
+    this.say(
+      pixels
+        ? `${payload.name} — ${payload.shapes.length} shape(s)`
+        : "that image could not be loaded — its shapes are still editable",
+    );
+
+    // Warm both neighbours: N is the common case, E the second most common.
+    for (const neighbour of [payload.next, payload.previous]) {
+      if (neighbour) this.pixels(neighbour);
+    }
   }
 
-  loadPixels(imageId) {
-    return new Promise((resolve) => {
-      const img = new Image();
-      img.decoding = "async";
-      img.onload = () => {
-        // Mips are built once per image, at load. See viewport.js for why.
-        this.mips = buildMips(img);
-        // The database is the authority on size, but if a row predates the
-        // EXIF work its dimensions could disagree with the pixels. Trust what
-        // decoded, or every box on this image is drawn in the wrong space.
-        if (img.naturalWidth && img.naturalHeight) {
-          this.view.setImageSize(img.naturalWidth, img.naturalHeight);
-          this.scene.width = img.naturalWidth;
-          this.scene.height = img.naturalHeight;
-        }
-        this.scene.invalidate();
-        resolve();
-      };
-      img.onerror = () => {
-        this.mips = null;
-        this.say("that image could not be loaded — its shapes are still editable");
-        resolve();
-      };
-      img.src = this.api.imageUrl(this.projectId, imageId);
-    });
+  // Decoded pixels by image id, least recently used first. Kept small on
+  // purpose: each entry is a full-resolution image plus its mips, and three
+  // covers the previous, current and next image.
+  pixels(imageId) {
+    let entry = this.pixelCache.get(imageId);
+    if (entry) {
+      this.pixelCache.delete(imageId);
+    } else {
+      entry = decodePixels(this.api.imageUrl(this.projectId, imageId));
+      // A failure is not cached: the next attempt may well succeed.
+      entry.then((result) => {
+        if (!result && this.pixelCache.get(imageId) === entry) this.pixelCache.delete(imageId);
+      });
+    }
+    this.pixelCache.set(imageId, entry);
+    while (this.pixelCache.size > PIXEL_CACHE) {
+      const oldest = this.pixelCache.keys().next().value;
+      const evicted = this.pixelCache.get(oldest);
+      this.pixelCache.delete(oldest);
+      evicted.then((result) => {
+        if (result && result.mips !== this.mips) releaseMips(result.mips);
+      });
+    }
+    return entry;
   }
 
   // -- saving -------------------------------------------------------------
@@ -198,6 +232,10 @@ class Editor {
   }
 
   async save() {
+    // One save at a time. Two in flight would both carry the same base
+    // version, the second would 409, and the conflict path would reload the
+    // server copy over the user's newest edit.
+    while (this.saving) await this.saving;
     if (!this.image) return;
     if (!this.scene.changed) {
       // Nothing to send. Say so, rather than leaving "unsaved" on screen --
@@ -207,6 +245,7 @@ class Editor {
       return;
     }
     const imageId = this.scene.imageId;
+    const revision = this.scene.revision;
     const submitted = this.scene.toWire();
     const localIds = this.scene.order.slice();
 
@@ -219,17 +258,30 @@ class Editor {
         // would corrupt it.
         if (this.scene.imageId !== imageId) return;
         this.scene.version = result.version;
-        this.scene.changed = false;
+        // The server may assign a new id to any shape, not only drafts -- an
+        // undone delete comes back under an id it no longer has. Adopt every
+        // one, or the next save inserts that shape a second time.
         (result.ids || []).forEach((serverId, index) => {
           const local = localIds[index];
-          if (local && isDraft(local)) this.scene.reid(local, serverId);
+          if (local && local !== serverId) this.scene.reid(local, serverId);
         });
         if (result.labels) this.rail.setLabels(result.labels);
         if (result.state) this.strip.setState(imageId, result.state);
-        this.setStatusDot("saved");
         this.scene.invalidate();
+        if (this.scene.revision === revision) {
+          this.scene.changed = false;
+          this.setStatusDot("saved");
+        } else {
+          // Edited while the request was in flight: that work is not saved
+          // yet, so neither the flag nor the dot may say it is.
+          this.queueSave();
+        }
       })
       .catch(async (error) => {
+        if (this.scene.imageId !== imageId) {
+          this.say(`an earlier image failed to save: ${describe(error)}`);
+          return;
+        }
         if (error instanceof Conflict) {
           // Somebody else moved this image. Take their version rather than
           // overwrite it, and say so plainly.
@@ -430,6 +482,9 @@ class Editor {
         this.panning = { x: event.offsetX, y: event.offsetY };
         return;
       }
+      // Right-click belongs to the context-menu delete. Letting it through
+      // to the tools added a polygon vertex or started a box underneath it.
+      if (event.button !== 0) return;
       // Left-drag on empty canvas with the select tool draws a box: no mode
       // to enter, which is the entire interaction argument of this product.
       if (
@@ -506,14 +561,12 @@ class Editor {
     requestAnimationFrame(() => this.frame());
   }
 
+  // The same test the select tool uses. A bbox-only check here treated the
+  // outer half of every resize handle as empty canvas -- grabbing a corner
+  // started a new box instead -- and the hollow of a concave polygon as solid.
   hitSomething(ix, iy) {
-    for (let i = this.scene.order.length - 1; i >= 0; i--) {
-      const shape = this.scene.get(this.scene.order[i]);
-      if (!shape || !this.visible(shape)) continue;
-      const [x1, y1, x2, y2] = shape.bbox;
-      if (ix >= x1 && ix <= x2 && iy >= y1 && iy <= y2) return shape.id;
-    }
-    return null;
+    const hit = hitTest(this.scene, ix, iy, this.view.scale, (s) => this.visible(s));
+    return hit ? hit.id : null;
   }
 
   frame() {
@@ -577,6 +630,15 @@ class Editor {
         return;
       }
 
+      // Actual size is Shift+0, by physical key so it works on any layout.
+      // Plain 0 is class ten; it cannot be both.
+      if (event.shiftKey && event.code === "Digit0") {
+        event.preventDefault();
+        this.view.actual(this.canvas.getBoundingClientRect());
+        this.scene.invalidate();
+        return;
+      }
+
       if (/^[0-9]$/.test(event.key)) {
         event.preventDefault();
         const digit = Number(event.key);
@@ -593,6 +655,7 @@ class Editor {
 
       switch (event.key.toLowerCase()) {
         case "escape":
+          this.pendingGeometry = null;
           this.assistPanel.disarm();
           this.cancelTool();
           this.scene.clearSelection();
@@ -617,10 +680,6 @@ class Editor {
           break;
         case "f":
           this.view.fit(this.canvas.getBoundingClientRect());
-          this.scene.invalidate();
-          break;
-        case "0":
-          this.view.actual(this.canvas.getBoundingClientRect());
           this.scene.invalidate();
           break;
         case "n":
@@ -648,6 +707,14 @@ class Editor {
       if (event.key === "?" || (event.key === "/" && event.shiftKey)) {
         this.help.hidden = !this.help.hidden;
       }
+    });
+
+    // Alt-Tab with space held never delivers the keyup, and every click
+    // afterwards would pan. Losing focus releases everything held.
+    window.addEventListener("blur", () => {
+      this.spacePanning = false;
+      this.panning = null;
+      this.canvas.style.cursor = this.tool === this.tools.select ? "default" : "crosshair";
     });
 
     window.addEventListener("keyup", (event) => {
@@ -693,6 +760,9 @@ class Editor {
       document.getElementById("conf-value").textContent = `${slider.value}%`;
       this.scene.invalidate();
     });
+    // Hand the keyboard back once the drag ends. A focused range input counts
+    // as a typing target, so every shortcut went dead until the next click.
+    slider.addEventListener("change", () => slider.blur());
 
     document.getElementById("btn-accept").addEventListener("click", () => this.acceptAll());
 
