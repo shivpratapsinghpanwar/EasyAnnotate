@@ -326,6 +326,13 @@ def import_predictions(
         )
         projects_mod.touch(conn, project.id)
 
+    # An attached folder's label files must show what the editor shows.
+    # Model shapes are written with their score, so they stay predictions.
+    from . import attach
+
+    for problem in attach.sync(store, project, [image.id for image in touched])[:5]:
+        notes.append(f"not written to disk: {problem}")
+
     unmatched_images = len(every_image) - matched - skipped_reviewed
     if matcher.ambiguous:
         sample = ", ".join(sorted(matcher.ambiguous)[:5])
@@ -400,7 +407,11 @@ def set_predictions(
             (len(predicted) + kept_model, image.id),
         )
 
-    if image.state == "todo":
+    # A reviewed image that has just received fresh, unexamined model shapes is
+    # not reviewed any more. Leaving the flag would let the reviewed-only export
+    # ship raw predictions as training data -- the self-poisoning that default
+    # exists to prevent -- and would count them as agreement besides.
+    if image.state == "todo" or (predicted and image.state in PROTECTED_STATES):
         images_mod.set_state(store, project, image, "predicted")
 
 

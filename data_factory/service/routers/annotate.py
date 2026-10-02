@@ -95,6 +95,29 @@ def _image(store: Store, project, image_id: str):
         raise _fail(exc) from None
 
 
+def _sync_disk(store: Store, project, image_ids) -> list[str]:
+    """Write changed images back to an attached folder's own label files."""
+    if not project.is_attached:
+        return []
+    from ...annotate import attach
+
+    return attach.sync(store, project, image_ids)
+
+
+def attach_images_using(store: Store, project, idx: int) -> list[str]:
+    if not project.is_attached:
+        return []
+    from ...annotate import attach
+
+    return attach.images_using(store, project, idx)
+
+
+def _with_disk(payload: dict[str, Any], problems: list[str]) -> dict[str, Any]:
+    if problems:
+        payload["sidecar_errors"] = problems
+    return payload
+
+
 def _image_payload(store: Store, project, image) -> dict[str, Any]:
     stored = shapes_mod.listing(store, project, image)
     return {
@@ -229,11 +252,13 @@ def patch_label(
     project = _project(store, project_id, owner)
     try:
         label = labels_mod.get(store, project, idx)
+        problems: list[str] = []
         if body.name is not None:
             label = labels_mod.rename(store, project, idx, body.name)
+            problems = _sync_disk(store, project, attach_images_using(store, project, idx))
         if body.colour is not None:
             label = labels_mod.recolour(store, project, idx, body.colour)
-        return label.as_dict()
+        return _with_disk(label.as_dict(), problems)
     except StoreError as exc:
         raise _fail(exc) from None
 
@@ -249,9 +274,11 @@ def retire_label(
     index must stay occupied so later classes do not shift."""
     project = _project(store, project_id, owner)
     try:
-        return labels_mod.retire(store, project, idx).as_dict()
+        retired = labels_mod.retire(store, project, idx)
     except StoreError as exc:
         raise _fail(exc) from None
+    problems = _sync_disk(store, project, attach_images_using(store, project, idx))
+    return _with_disk(retired.as_dict(), problems)
 
 
 class MergeIn(BaseModel):
@@ -272,15 +299,17 @@ def merge_label(
     later class shifts.
     """
     project = _project(store, project_id, owner)
+    affected = attach_images_using(store, project, idx)
     try:
         moved = labels_mod.merge(store, project, idx, body.into)
     except StoreError as exc:
         raise _fail(exc) from None
-    return {
+    problems = _sync_disk(store, project, affected)
+    return _with_disk({
         "moved": moved,
         "labels": [label.as_dict() for label in labels_mod.listing(store, project)],
         "class_list": labels_mod.class_list(store, project),
-    }
+    }, problems)
 
 
 @router.post("/projects/{project_id}/labels/{idx}/restore")
@@ -292,9 +321,11 @@ def restore_label(
 ) -> dict[str, Any]:
     project = _project(store, project_id, owner)
     try:
-        return labels_mod.restore(store, project, idx).as_dict()
+        restored = labels_mod.restore(store, project, idx)
     except StoreError as exc:
         raise _fail(exc) from None
+    problems = _sync_disk(store, project, attach_images_using(store, project, idx))
+    return _with_disk(restored.as_dict(), problems)
 
 
 # ---------------------------------------------------------------- images
@@ -473,14 +504,15 @@ def accept_image(
     project = _project(store, project_id, owner)
     image = _image(store, project, image_id)
     confirmed = review.accept_all(store, project, image)
+    problems = _sync_disk(store, project, [image.id])
     nxt = images_mod.neighbour(store, project, image, 1)
-    return {
+    return _with_disk({
         "confirmed": confirmed,
         "state": image.state,
         "next": nxt.id if nxt else None,
         "counts": images_mod.counts(store, project),
         "agreement": shapes_mod.agreement(store, project),
-    }
+    }, problems)
 
 
 @router.get("/projects/{project_id}/runs")

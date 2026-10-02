@@ -28,6 +28,7 @@ the project as ``sidecar_format`` and reported, never silently assumed.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
@@ -120,6 +121,41 @@ def write_through(
     except OSError as exc:
         raise AttachError(f"could not write {target.name}: {exc}") from exc
     return target
+
+
+def sync(store: Store, project: projects_mod.Project, image_ids: Iterable[str]) -> list[str]:
+    """Bring these images' label files into step with the database.
+
+    Every change that alters what an image holds -- a save, a prediction
+    import, a class renamed, merged or retired -- must end here, or the folder
+    drifts from the database and the next ordinary save writes the drift out
+    in one surprising lump. Returns problems rather than raising: the database
+    already has the change, so a read-only folder is a warning, not a loss.
+    """
+    if not project.is_attached or not project.sidecar_format:
+        return []
+    problems: list[str] = []
+    for image_id in dict.fromkeys(image_ids):
+        try:
+            write_through(store, project, images_mod.get(store, project, image_id))
+        except StoreError as exc:
+            problems.append(str(exc))
+    if project.sidecar_format == "yolo":
+        # A rename changes no .txt -- indices are stable -- but it does change
+        # data.yaml, even when no image uses the class yet.
+        _refresh_data_yaml(store, project, yolo.ClassList(labels_mod.class_list(store, project)))
+    return problems
+
+
+def images_using(store: Store, project: projects_mod.Project, label_idx: int) -> list[str]:
+    """Ids of the images holding at least one shape of this class."""
+    return [
+        row["image_id"]
+        for row in store.query(
+            "SELECT DISTINCT image_id FROM shape WHERE project_id = ? AND label_idx = ?",
+            (project.id, int(label_idx)),
+        )
+    ]
 
 
 def _refresh_data_yaml(store: Store, project: projects_mod.Project, classes) -> None:
