@@ -123,13 +123,19 @@ whole setup. There is no organisation to create, no project template, no task,
 no label schema — **a class is created by drawing a box and typing its name.**
 
 ```
-drag              draw a box in the current class
+drag              draw a box in the current class -- inside other boxes too
+click             select a shape; drag it to move, its handles to resize
+/                 find a class by typing (never makes a Close/close variant)
 P                 polygon: click points, Enter or double-click to close
 1–0               pick a class — or re-class what is selected
 Alt+click         on a vertex: delete it. On an edge midpoint: insert one
 Ctrl+D            copy the previous image's shapes (worth more than a model on video)
 R                 mark reviewed and move on
 S                 skip — "I can't tell". Never exported
+arrows            nudge the selection 1px, Shift 10px
+Tab               select the next shape, even one buried under another
+Ctrl+C / Ctrl+V   copy shapes, paste onto this image or the next
+H                 hide every shape to see the bare image
 ?                 every shortcut
 ```
 

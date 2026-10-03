@@ -70,7 +70,13 @@ Docker (item 6) is fixed by configuration and a test, but has not been run.
 
 **Done when** each has a test that fails on the old code, and the full suite is green.
 
-### M1 — Editor essentials *(editor 6→8, perf →7)*
+### M1 — Editor essentials *(editor 6→8, perf →7)* — **done, except lock**
+
+Shipped: guides with a size readout, nudge, Tab, Ctrl+A/C/V, trackpad pan and
+pinch, class search that refuses case variants, per-class hide and `H`, a shape
+list, occluded/truncated/difficult flags, brightness/contrast, a virtual paged
+filmstrip with a state filter, drawing inside boxes. Per-shape *lock* was not
+built: hide covers the need until someone asks. Owner gate still open.
 
 Crosshair guides while drawing · arrow-key nudge (Shift ×10) · Tab to cycle
 overlapping shapes · hide/lock per shape and class, with a shape list ·

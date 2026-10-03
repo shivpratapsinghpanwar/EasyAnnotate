@@ -33,7 +33,7 @@ the first box. Removing that is the entire product argument.
 ## State
 
 **Phases 0–4 of `docs/PLAN.md` are done, and M0 ("trust") of
-`docs/ROADMAP.md`.** 637 tests pass, including 13 browser tests (install
+`docs/ROADMAP.md`, and M1 (editor essentials).** 649 tests pass, including 24 browser tests (install
 playwright to run them). **The roadmap is the plan of record now** — a scored
 path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
 
@@ -89,7 +89,7 @@ index, retiring keeps the slot, new classes append. It used to be
 .\.venv\Scripts\activate
 datafactory serve                 # http://localhost:8765
 datafactory annotate <folder>     # edit a folder's labels in place
-python -m pytest                  # 637; 13 browser tests skip without playwright
+python -m pytest                  # 649; 24 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3
