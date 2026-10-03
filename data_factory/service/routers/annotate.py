@@ -55,6 +55,10 @@ class StatePatch(BaseModel):
     state: str
 
 
+#: Shape fields the editor may not send, and which a save must therefore keep.
+KEPT_ATTRIBUTES = ("pose", "truncated", "difficult", "occluded")
+
+
 class ShapesIn(BaseModel):
     version: int | None = Field(
         default=None,
@@ -424,11 +428,21 @@ def save_shapes(
             413, f"an image can hold at most {MAX_SHAPES_PER_SAVE:,} shapes in one save"
         )
 
+    # A client that omits an attribute means "unchanged", not "reset". Older
+    # editors sent none of these, and every save cleared VOC's difficult,
+    # truncated, occluded and pose -- into the user's own XML in attached mode.
+    stored = {s.id: s.shape for s in shapes_mod.listing(store, project, image)}
     incoming: list[tuple[str | None, Shape]] = []
     try:
         for raw in body.shapes:
             raw_id = raw.get("id")
             shape_id = raw_id if isinstance(raw_id, str) and valid_id(raw_id) else None
+            before = stored.get(shape_id) if shape_id else None
+            if before is not None:
+                raw = {
+                    **{key: getattr(before, key) for key in KEPT_ATTRIBUTES if key not in raw},
+                    **raw,
+                }
             incoming.append((shape_id, Shape.from_dict(raw)))
     except AnnotationError as exc:
         raise _fail(exc) from None

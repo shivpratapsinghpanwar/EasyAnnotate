@@ -77,6 +77,10 @@ export class Scene {
         origin: raw.origin || "human",
         confidence: raw.confidence,
         edited: !!raw.edited,
+        // Carried through untouched so a save cannot reset them. VOC's
+        // difficult flag changes how a detector is scored; losing it to an
+        // unrelated box nudge is damage nobody sees until evaluation.
+        attributes: attributesOf(raw),
       };
       this.shapes.set(shape.id, shape);
       this.order.push(shape.id);
@@ -201,6 +205,7 @@ export class Scene {
         bbox: shape.bbox,
         polygon: shape.polygon,
         confidence: shape.confidence ?? null,
+        ...(shape.attributes || {}),
       };
     });
   }
@@ -221,9 +226,18 @@ export function rebuildBox(shape) {
   return shape;
 }
 
+export const ATTRIBUTE_KEYS = ["pose", "truncated", "difficult", "occluded"];
+
+export function attributesOf(raw) {
+  const out = {};
+  for (const key of ATTRIBUTE_KEYS) if (raw[key] !== undefined) out[key] = raw[key];
+  return out;
+}
+
 export function cloneShape(shape) {
   return {
     ...shape,
+    attributes: { ...(shape.attributes || {}) },
     bbox: shape.bbox.slice(),
     polygon: shape.polygon ? shape.polygon.map((p) => p.slice()) : null,
   };

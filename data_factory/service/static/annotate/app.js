@@ -15,7 +15,7 @@ import { Filmstrip } from "./filmstrip.js";
 import { LabelRail } from "./labels.js";
 import { hitTest } from "./hit.js";
 import { draw } from "./render.js";
-import { Scene, cloneShape, draftId } from "./scene.js";
+import { Scene, attributesOf, cloneShape, draftId } from "./scene.js";
 import { AssistPanel } from "./assist.js";
 import { UndoStack, addMany, addShape, changeLabel, removeShape } from "./undo.js";
 import { Viewport, decodePixels, releaseMips } from "./viewport.js";
@@ -1000,6 +1000,7 @@ class Editor {
           origin: "human",
           confidence: null,
           edited: false,
+          attributes: attributesOf(raw),
         })
       );
       for (const shape of copies) this.scene.add(cloneShape(shape));

@@ -388,3 +388,47 @@ def test_a_decompression_bomb_is_refused_before_it_is_decoded(tmp_path, monkeypa
         assert decoded == []
     finally:
         deps.reset_stores()
+
+
+# ------------------------------------------- attributes survive editor saves
+
+
+def test_an_editor_save_keeps_difficult_and_truncated(attached_client):
+    """The editor never sent VOC's flags, and the server read their absence
+    as zero: nudging any box cleared difficult/truncated in the user's XML."""
+    import xml.etree.ElementTree as ET
+
+    client, project, folder = attached_client
+    xml = folder / "a1.xml"
+    xml.write_text(
+        xml.read_text(encoding="utf-8").replace(
+            "<name>Open</name>", "<name>Open</name><difficult>1</difficult><truncated>1</truncated>"
+        ),
+        encoding="utf-8",
+    )
+    # Re-read the edited file into the project, as reopening the folder would.
+    from data_factory.annotate import attach as attach_mod
+    from data_factory.service import deps
+
+    store_ = deps.get_store()
+    image = images.by_path(store_, project, "a1.jpg")
+    stored = shapes.listing(store_, project, image)
+    shapes.save(
+        store_, project, image,
+        [(stored[0].id, Shape(label="Open", bbox=stored[0].shape.bbox, difficult=1, truncated=1))],
+    )
+    attach_mod.sync(store_, project, [image.id])
+
+    detail = client.get(f"/api/projects/{project.id}/images/{image.id}").json()
+    shape = detail["shapes"][0]
+    moved = [shape["bbox"][0] + 5, shape["bbox"][1], shape["bbox"][2] + 5, shape["bbox"][3]]
+    response = client.put(
+        f"/api/projects/{project.id}/images/{image.id}/shapes",
+        json={"version": detail["version"],
+              "shapes": [{"id": shape["id"], "label": "Open", "bbox": moved}]},
+    )
+    assert response.status_code == 200, response.text
+
+    obj = ET.parse(xml).getroot().find("object")
+    assert obj.findtext("difficult") == "1"
+    assert obj.findtext("truncated") == "1"
