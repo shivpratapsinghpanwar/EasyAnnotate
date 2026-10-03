@@ -110,8 +110,9 @@ export class Api {
     return this.post("/api/projects", { name });
   }
 
-  images(id, { state = "", limit = 500, offset = 0 } = {}) {
+  images(id, { state = "", limit = 500, offset = 0, locate = "" } = {}) {
     const query = new URLSearchParams({ state, limit, offset });
+    if (locate) query.set("locate", locate);
     return this.get(`/api/projects/${id}/images?${query}`);
   }
 

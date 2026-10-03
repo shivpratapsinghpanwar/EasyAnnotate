@@ -746,3 +746,46 @@ def test_the_shape_list_selects_what_is_clicked(browser, service, bare_images):
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------------------------ M1: at scale
+
+
+def test_the_filmstrip_reaches_past_two_thousand_images(browser, service, tmp_path):
+    """The strip fetched one page of 2,000 and showed nothing beyond it. The
+    door set has 15,514 images."""
+    import shutil
+
+    from data_factory.annotate import attach
+    from data_factory.service.deps import get_store
+
+    folder = tmp_path / "many"
+    folder.mkdir()
+    seed = make_image(folder / "img00000.jpg", 5, size=(64, 48))
+    for index in range(1, 2500):
+        shutil.copyfile(seed, folder / f"img{index:05d}.jpg")
+    project = attach.open_folder(get_store(), folder)["project"]
+
+    errors: list[str] = []
+    page = open_editor(browser, service, project.id, errors)
+    try:
+        assert page.evaluate("window.__editor.strip.total") == 2500
+        # Only the rows on screen exist -- not 2,500 nodes.
+        assert page.locator(".strip-item").count() < 80
+
+        page.evaluate(
+            "const l = document.querySelector('[data-role=strip-list]'); l.scrollTop = l.scrollHeight"
+        )
+        page.wait_for_selector(".strip-item[data-id] >> text=img02499.jpg", timeout=10_000)
+        page.locator(".strip-item >> text=img02499.jpg").click()
+        page.wait_for_function("window.__editor.image && window.__editor.image.name === 'img02499.jpg'")
+
+        page.select_option("[data-role=strip-filter]", "reviewed")
+        page.wait_for_timeout(300)
+        assert page.locator(".strip-item").count() == 0
+        page.keyboard.press("r")
+        page.wait_for_function("window.__editor.strip.total === 1", timeout=10_000)
+        page.wait_for_selector(".strip-item >> text=img02499.jpg", timeout=10_000)
+    finally:
+        page.close()
+    assert not errors, errors

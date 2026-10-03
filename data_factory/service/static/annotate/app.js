@@ -54,7 +54,6 @@ class Editor {
 
     this.projectId = new URLSearchParams(location.search).get("project") || "";
     this.project = null;
-    this.images = [];
     this.image = null;
     this.mips = null;
     this.pixelCache = new Map();
@@ -120,6 +119,7 @@ class Editor {
     this.strip = new Filmstrip(document.getElementById("filmstrip"), {
       onOpen: (id) => this.openImage(id),
       thumbUrl: (id) => this.api.thumbUrl(this.projectId, id),
+      fetchPage: (query) => this.api.images(this.projectId, query),
     });
 
     this.bindCanvas();
@@ -162,11 +162,10 @@ class Editor {
     else this.say("this project has no images yet");
   }
 
+  // Only the counts: the strip fetches its own rows, a page at a time.
   async loadImageList() {
-    const payload = await this.api.images(this.projectId, { limit: 2000 });
-    this.images = payload.images;
-    this.strip.setImages(this.images);
-    this.strip.setCounts(payload.counts);
+    const payload = await this.api.images(this.projectId, { limit: 1 });
+    this.strip.reset(payload.counts);
   }
 
   async openImage(imageId) {
@@ -1281,7 +1280,7 @@ function writePreference(key, value) {
 function isTypingTarget(node) {
   if (!node) return false;
   const tag = node.tagName;
-  return tag === "INPUT" || tag === "TEXTAREA" || node.isContentEditable;
+  return tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || node.isContentEditable;
 }
 
 function describe(error) {

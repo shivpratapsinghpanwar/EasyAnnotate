@@ -60,10 +60,16 @@
     letter-spacing: .07em; color: var(--dim); border-bottom: 1px solid var(--line);
   }
 
-  [data-role="strip-list"] { overflow-y: auto; flex: 1; padding: 6px; }
+  [data-role="strip-list"] { overflow-y: auto; flex: 1; padding: 6px; position: relative; }
   .strip-item {
     display: grid; grid-template-columns: 3px 44px 1fr; gap: 7px;
     align-items: center; padding: 4px; border-radius: 5px; cursor: pointer;
+    height: 41px; box-sizing: border-box;
+  }
+  [data-role="strip-filter"] {
+    float: right; background: #1d1d1a; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 4px; font: inherit; font-size: 11px; text-transform: none; letter-spacing: 0;
+    margin: -3px 0;
   }
   .strip-item:hover { background: #232320; }
   .strip-item[data-current="true"] { background: #2e2e28; outline: 1px solid #4a4a42; }
@@ -177,13 +183,22 @@
 
 <main>
   <section id="filmstrip">
-    <div class="panel-head">Images</div>
+    <div class="panel-head">Images
+      <select data-role="strip-filter" title="Show only images in one state">
+        <option value="">all</option>
+        <option value="todo">to do</option>
+        <option value="predicted">predicted</option>
+        <option value="in_progress">in progress</option>
+        <option value="reviewed">reviewed</option>
+        <option value="skipped">skipped</option>
+      </select>
+    </div>
     <div data-role="strip-list"></div>
     <div data-role="strip-counts"></div>
     <template data-role="strip-item">
       <div class="strip-item">
         <div data-role="strip-state"></div>
-        <img alt="" loading="lazy">
+        <img alt="">
         <div data-role="strip-name"></div>
       </div>
     </template>

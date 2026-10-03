@@ -1,9 +1,10 @@
 // The image list down the side: where you are, and how much is left.
 //
-// Thumbnails load lazily through an IntersectionObserver rather than all at
-// once. A 20,000-image project would otherwise open twenty thousand requests
-// on the first paint, and the browser would spend the next minute doing
-// nothing useful.
+// Virtual, because projects are large. A spacer as tall as every row would be
+// gives the scrollbar its true length; only the rows on screen exist in the
+// DOM, and their data arrives a page at a time as you scroll. The first
+// version built a node per image and stopped at 2,000 -- the door set alone
+// has 15,514.
 //
 // State is shown as a colour bar rather than an icon, because the useful
 // question is "how much of this strip is green", answered by glancing rather
@@ -17,87 +18,236 @@ export const STATE_COLOURS = {
   skipped: "#8a4b8a",
 };
 
+export const ROW_HEIGHT = 41;
+const PAGE = 200;
+const OVERSCAN = 8;
+// Rows kept built while off screen, so scrolling back does not refetch or
+// re-decode thumbnails. Bounded: an unbounded cache is a slow leak.
+const NODE_CACHE = 400;
+
 export class Filmstrip {
-  constructor(root, { onOpen, thumbUrl }) {
+  constructor(root, { onOpen, thumbUrl, fetchPage }) {
     this.root = root;
     this.list = root.querySelector('[data-role="strip-list"]');
     this.template = root.querySelector('[data-role="strip-item"]');
     this.counts = root.querySelector('[data-role="strip-counts"]');
+    this.filterBox = root.querySelector('[data-role="strip-filter"]');
     this.onOpen = onOpen;
     this.thumbUrl = thumbUrl;
-    this.nodes = new Map();
+    this.fetchPage = fetchPage;
+
+    this.filter = "";
+    this.total = 0;
+    this.lastCounts = null;
+    this.pages = new Map(); // page number -> images[] (or a pending promise)
+    this.nodes = new Map(); // image id -> row node, LRU by insertion order
     this.currentId = null;
+    this.generation = 0;
 
-    this.observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (!entry.isIntersecting) continue;
-          const img = entry.target;
-          if (!img.dataset.src) continue;
-          img.src = img.dataset.src;
-          delete img.dataset.src;
-          this.observer.unobserve(img);
-        }
-      },
-      { root: this.list, rootMargin: "300px" }
-    );
-  }
+    this.spacer = document.createElement("div");
+    this.spacer.style.position = "relative";
+    this.list.replaceChildren(this.spacer);
 
-  setImages(images) {
-    this.list.replaceChildren();
-    this.nodes.clear();
-
-    for (const image of images) {
-      const node = this.template.content.firstElementChild.cloneNode(true);
-      const img = node.querySelector("img");
-      const name = node.querySelector('[data-role="strip-name"]');
-      const bar = node.querySelector('[data-role="strip-state"]');
-
-      img.dataset.src = this.thumbUrl(image.id);
-      img.alt = image.name;
-      // A broken thumbnail is a normal finding in a real dataset -- a corrupt
-      // file is one of the things inspect.health looks for -- so it must not
-      // leave a browser's broken-image glyph implying the tool failed.
-      img.addEventListener("error", () => {
-        img.remove();
-        node.dataset.broken = "true";
+    let queued = false;
+    this.list.addEventListener("scroll", () => {
+      if (queued) return;
+      queued = true;
+      requestAnimationFrame(() => {
+        queued = false;
+        this.draw();
       });
-      name.textContent = image.name;
-      name.title = image.path;
-      bar.style.background = STATE_COLOURS[image.state] || STATE_COLOURS.todo;
-      node.dataset.id = image.id;
-      node.dataset.state = image.state;
+    });
+    new ResizeObserver(() => this.draw()).observe(this.list);
 
-      node.addEventListener("click", () => this.onOpen(image.id));
-      this.observer.observe(img);
-      this.list.append(node);
+    if (this.filterBox) {
+      this.filterBox.addEventListener("change", () => {
+        this.setFilter(this.filterBox.value);
+        this.filterBox.blur();
+      });
+    }
+  }
+
+  // -- data ---------------------------------------------------------------
+
+  // Forget every loaded page and start over -- after an import, or when the
+  // filter changes what the list contains.
+  reset(counts) {
+    this.generation += 1;
+    this.pages.clear();
+    if (counts) this.setCounts(counts);
+    this.draw();
+  }
+
+  setFilter(state) {
+    this.filter = state || "";
+    this.list.scrollTop = 0;
+    this.reset(this.lastCounts);
+    if (this.currentId) this.reveal(this.currentId);
+  }
+
+  imageAt(index) {
+    const page = this.pages.get(Math.floor(index / PAGE));
+    return Array.isArray(page) ? page[index % PAGE] || null : null;
+  }
+
+  ensurePage(number) {
+    if (this.pages.has(number) || number * PAGE >= this.total) return;
+    const generation = this.generation;
+    const pending = this.fetchPage({ state: this.filter, offset: number * PAGE, limit: PAGE })
+      .then((payload) => {
+        // A filter change or reset while this was in flight makes it stale.
+        if (generation !== this.generation) return;
+        this.pages.set(number, payload.images);
+        this.draw();
+      })
+      .catch(() => {
+        if (generation === this.generation) this.pages.delete(number);
+      });
+    this.pages.set(number, pending);
+  }
+
+  // -- drawing ------------------------------------------------------------
+
+  draw() {
+    this.spacer.style.height = `${this.total * ROW_HEIGHT}px`;
+    const top = this.list.scrollTop;
+    const height = this.list.clientHeight || 600;
+    const first = Math.max(0, Math.floor(top / ROW_HEIGHT) - OVERSCAN);
+    const last = Math.min(this.total - 1, Math.ceil((top + height) / ROW_HEIGHT) + OVERSCAN);
+
+    const wanted = [];
+    for (let index = first; index <= last; index++) {
+      this.ensurePage(Math.floor(index / PAGE));
+      const image = this.imageAt(index);
+      if (image) wanted.push([index, image]);
+    }
+
+    const keep = new Set();
+    for (const [index, image] of wanted) {
+      const node = this.nodeFor(image);
+      node.style.top = `${index * ROW_HEIGHT}px`;
+      keep.add(node);
+      if (node.parentNode !== this.spacer) this.spacer.append(node);
+    }
+    for (const child of [...this.spacer.children]) {
+      if (!keep.has(child)) child.remove();
+    }
+  }
+
+  nodeFor(image) {
+    let node = this.nodes.get(image.id);
+    if (node) {
+      // Refresh LRU position, and pick up a state that changed meanwhile.
+      this.nodes.delete(image.id);
       this.nodes.set(image.id, node);
+      this.paintState(node, image.state);
+      return node;
     }
-    if (this.currentId) this.setCurrent(this.currentId);
+    node = this.template.content.firstElementChild.cloneNode(true);
+    const img = node.querySelector("img");
+    const name = node.querySelector('[data-role="strip-name"]');
+
+    img.src = this.thumbUrl(image.id);
+    img.alt = image.name;
+    // A broken thumbnail is a normal finding in a real dataset -- a corrupt
+    // file is one of the things inspect.health looks for -- so it must not
+    // leave a browser's broken-image glyph implying the tool failed.
+    img.addEventListener("error", () => {
+      img.remove();
+      node.dataset.broken = "true";
+    });
+    name.textContent = image.name;
+    name.title = image.path;
+    node.dataset.id = image.id;
+    node.style.position = "absolute";
+    node.style.left = "0";
+    node.style.right = "0";
+    this.paintState(node, image.state);
+    if (image.id === this.currentId) node.dataset.current = "true";
+    node.addEventListener("click", () => this.onOpen(image.id));
+
+    this.nodes.set(image.id, node);
+    while (this.nodes.size > NODE_CACHE) {
+      const [oldest, stale] = this.nodes.entries().next().value;
+      if (stale.isConnected) break; // never evict a row on screen
+      this.nodes.delete(oldest);
+    }
+    return node;
   }
 
-  setCurrent(imageId) {
-    for (const [id, node] of this.nodes) {
-      if (id === imageId) node.dataset.current = "true";
-      else delete node.dataset.current;
-    }
-    this.currentId = imageId;
-    const node = this.nodes.get(imageId);
-    if (node) node.scrollIntoView({ block: "nearest" });
-  }
-
-  setState(imageId, state) {
-    const node = this.nodes.get(imageId);
-    if (!node) return;
+  paintState(node, state) {
     node.dataset.state = state;
     const bar = node.querySelector('[data-role="strip-state"]');
     if (bar) bar.style.background = STATE_COLOURS[state] || STATE_COLOURS.todo;
   }
 
+  // -- the open image ---------------------------------------------------------
+
+  setCurrent(imageId, position) {
+    const previous = this.nodes.get(this.currentId);
+    if (previous) delete previous.dataset.current;
+    this.currentId = imageId;
+    const node = this.nodes.get(imageId);
+    if (node) node.dataset.current = "true";
+    if (position != null) this.scrollToIndex(position);
+    else this.reveal(imageId);
+  }
+
+  // Scroll so the open image is on screen, asking the server where it is when
+  // it is not in a page already loaded.
+  async reveal(imageId) {
+    for (const [number, page] of this.pages) {
+      if (!Array.isArray(page)) continue;
+      const at = page.findIndex((image) => image.id === imageId);
+      if (at >= 0) {
+        this.scrollToIndex(number * PAGE + at);
+        return;
+      }
+    }
+    try {
+      const payload = await this.fetchPage({ state: this.filter, offset: 0, limit: 1, locate: imageId });
+      if (payload.position != null && imageId === this.currentId) this.scrollToIndex(payload.position);
+    } catch {
+      // Not knowing where it is only costs the scroll.
+    }
+  }
+
+  scrollToIndex(index) {
+    const top = index * ROW_HEIGHT;
+    const view = this.list.clientHeight || 600;
+    if (top < this.list.scrollTop || top + ROW_HEIGHT > this.list.scrollTop + view) {
+      this.list.scrollTop = Math.max(0, top - view / 2 + ROW_HEIGHT / 2);
+    }
+    this.draw();
+  }
+
+  setState(imageId, state) {
+    for (const page of this.pages.values()) {
+      if (!Array.isArray(page)) continue;
+      const image = page.find((each) => each.id === imageId);
+      if (image) image.state = state;
+    }
+    const node = this.nodes.get(imageId);
+    if (node) this.paintState(node, state);
+  }
+
   setCounts(counts) {
+    if (!counts) return;
+    this.lastCounts = counts;
+    const total = this.filter ? counts[this.filter] || 0 : counts.total || 0;
+    if (total !== this.total) {
+      // A different length means rows moved -- an image left this filter.
+      // Pages already loaded are no longer where they claim to be.
+      if (this.filter) {
+        this.generation += 1;
+        this.pages.clear();
+      }
+      this.total = total;
+    }
     const done = counts.reviewed || 0;
-    const total = counts.total || 0;
-    const percent = total ? Math.round((done / total) * 100) : 0;
-    this.counts.textContent = `${done} / ${total} reviewed (${percent}%)`;
+    const all = counts.total || 0;
+    const percent = all ? Math.round((done / all) * 100) : 0;
+    this.counts.textContent = `${done} / ${all} reviewed (${percent}%)`;
+    this.draw();
   }
 }

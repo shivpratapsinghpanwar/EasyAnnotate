@@ -386,6 +386,25 @@ def set_size(store: Store, project: Project, image: Image, width: int, height: i
     return image
 
 
+def position(store: Store, project: Project, image_id: str, *, state: str = "") -> int | None:
+    """Where an image sits in the listing for ``state`` (all, if empty).
+
+    What lets the filmstrip scroll to the open image in a 20,000-image project
+    without fetching the 19,000 rows before it. ``None`` when the image is not
+    in that listing -- open, but filtered out.
+    """
+    sql = "SELECT seq, state FROM image WHERE project_id = ? AND id = ?"
+    row = store.one(sql, (project.id, image_id))
+    if row is None or (state and row["state"] != _check_state(state)):
+        return None
+    count_sql = "SELECT COUNT(*) AS n FROM image WHERE project_id = ? AND seq < ?"
+    params: list[Any] = [project.id, int(row["seq"])]
+    if state:
+        count_sql += " AND state = ?"
+        params.append(state)
+    return int(store.one(count_sql, tuple(params))["n"])
+
+
 def counts(store: Store, project: Project) -> dict[str, int]:
     """How much is left, by state. The number the progress bar shows."""
     out = {state: 0 for state in STATES}

@@ -340,19 +340,25 @@ def list_images(
     state: str = "",
     limit: int = 500,
     offset: int = 0,
+    locate: str = "",
     store: Store = Depends(get_store),
     owner: str = Depends(principal),
 ) -> dict[str, Any]:
+    """A page of images. ``locate`` names an image whose position in this
+    listing is returned as ``position`` -- null if the filter excludes it."""
     project = _project(store, project_id, owner)
     try:
         found = images_mod.listing(store, project, state=state, limit=limit, offset=offset)
+        payload: dict[str, Any] = {
+            "images": [i.as_dict() for i in found],
+            "counts": images_mod.counts(store, project),
+            "offset": offset,
+        }
+        if locate:
+            payload["position"] = images_mod.position(store, project, locate, state=state)
     except StoreError as exc:
         raise _fail(exc) from None
-    return {
-        "images": [i.as_dict() for i in found],
-        "counts": images_mod.counts(store, project),
-        "offset": offset,
-    }
+    return payload
 
 
 @router.get("/projects/{project_id}/resume")
