@@ -583,3 +583,89 @@ def test_edits_made_during_a_slow_save_are_kept(browser, service, bare_images):
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------------- M1: editing from the keys
+
+
+def _draw_named_box(page, name="Open", box=(300, 240, 520, 420)):
+    drag(page, *box)
+    if page.evaluate("window.__editor.rail.labels.length") == 0:
+        page.keyboard.type(name)
+        page.keyboard.press("Enter")
+    page.wait_for_function("window.__editor.scene.order.length >= 1")
+    page.wait_for_timeout(900)
+
+
+def test_arrow_keys_nudge_and_a_held_key_is_one_undo(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "nudge")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page)
+        before = _shape_boxes(page)[0]
+
+        for _ in range(5):
+            page.keyboard.press("ArrowRight")
+        page.keyboard.press("Shift+ArrowDown")
+        after = _shape_boxes(page)[0]
+        assert after == [before[0] + 5, before[1] + 10, before[2] + 5, before[3] + 10]
+
+        page.keyboard.press("Control+z")
+        assert _shape_boxes(page)[0] == before
+
+        page.wait_for_timeout(900)
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        page.wait_for_timeout(500)
+        assert _shape_boxes(page)[0] == before
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_tab_cycles_and_paste_carries_shapes_to_the_next_image(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "clip")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page)
+        drag(page, 560, 250, 700, 400)
+        page.wait_for_timeout(900)
+        page.keyboard.press("Escape")
+
+        page.keyboard.press("Tab")
+        first = page.evaluate("[...window.__editor.scene.selection]")
+        page.keyboard.press("Tab")
+        second = page.evaluate("[...window.__editor.scene.selection]")
+        assert len(first) == len(second) == 1 and first != second
+
+        page.keyboard.press("Control+a")
+        page.keyboard.press("Control+c")
+        boxes = sorted(_shape_boxes(page))
+        page.keyboard.press("n")
+        page.wait_for_function("window.__editor.image.name === 'p1.jpg'")
+        page.keyboard.press("Control+v")
+        page.wait_for_timeout(900)
+        assert sorted(_shape_boxes(page)) == boxes  # in place, on the new image
+        assert page.inner_text("#status") == "saved"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_guides_show_over_empty_canvas_only(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "guides")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.move(rect["x"] + 100, rect["y"] + 100)
+        assert page.evaluate("window.__editor.wantsCrosshair()")
+        _draw_named_box(page)
+        page.mouse.move(rect["x"] + 400, rect["y"] + 330)  # over the box
+        page.wait_for_timeout(100)
+        assert not page.evaluate("window.__editor.wantsCrosshair()")
+    finally:
+        page.close()
+    assert not errors, errors

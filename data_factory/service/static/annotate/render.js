@@ -93,6 +93,49 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
   // Labels are drawn in screen space, after restore, so text is always the
   // same size and upright regardless of zoom.
   if (options.showLabels !== false) drawLabels(ctx, scene, view, options);
+  if (options.crosshair) drawCrosshair(ctx, rect, options.crosshair);
+  if (options.draft && options.draft.kind === "box" && options.crosshair) {
+    drawSize(ctx, options.draft.bbox, options.crosshair);
+  }
+}
+
+// Full-canvas guides through the cursor. A box is only as tight as the
+// person can judge where its edge meets the object, and a line running the
+// whole width of the image makes that judgement against every pixel on the
+// row instead of against the few under a mouse pointer. Two strokes -- dark
+// under light -- so the guide reads on snow and on asphalt.
+function drawCrosshair(ctx, rect, { x, y }) {
+  ctx.save();
+  const px = Math.round(x) + 0.5;
+  const py = Math.round(y) + 0.5;
+  for (const [style, width] of [["rgba(0,0,0,.55)", 3], ["rgba(255,255,255,.8)", 1]]) {
+    ctx.strokeStyle = style;
+    ctx.lineWidth = width;
+    ctx.beginPath();
+    ctx.moveTo(0, py);
+    ctx.lineTo(rect.width, py);
+    ctx.moveTo(px, 0);
+    ctx.lineTo(px, rect.height);
+    ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// The size of the box being drawn, in image pixels, beside the cursor. Tiny
+// boxes are the commonest label defect inspect.health finds; seeing "6 × 4"
+// while drawing is cheaper than finding it after training.
+function drawSize(ctx, bbox, { x, y }) {
+  const [x1, y1, x2, y2] = bbox;
+  const text = `${Math.round(Math.abs(x2 - x1))} × ${Math.round(Math.abs(y2 - y1))}`;
+  ctx.save();
+  ctx.font = "11px ui-monospace, monospace";
+  ctx.textBaseline = "top";
+  const width = ctx.measureText(text).width + 8;
+  ctx.fillStyle = "rgba(0,0,0,.7)";
+  ctx.fillRect(x + 12, y + 12, width, 16);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, x + 16, y + 14);
+  ctx.restore();
 }
 
 function traceOutline(ctx, polygon) {

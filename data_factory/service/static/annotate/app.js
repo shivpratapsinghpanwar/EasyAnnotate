@@ -17,7 +17,15 @@ import { hitTest } from "./hit.js";
 import { draw } from "./render.js";
 import { Scene, attributesOf, cloneShape, draftId } from "./scene.js";
 import { AssistPanel } from "./assist.js";
-import { UndoStack, addMany, addShape, changeLabel, removeShape } from "./undo.js";
+import {
+  UndoStack,
+  addMany,
+  addShape,
+  changeLabel,
+  changeMany,
+  removeShape,
+  snapshot,
+} from "./undo.js";
 import { Viewport, decodePixels, releaseMips } from "./viewport.js";
 // tools/ are the *drawing* tools. assist.js is the panel for optional
 // model-backed helpers -- two different things that were both called
@@ -501,6 +509,8 @@ class Editor {
 
     this.canvas.addEventListener("pointermove", (event) => {
       const [ix, iy] = this.view.toImage(event.offsetX, event.offsetY);
+      this.pointer = { x: event.offsetX, y: event.offsetY };
+      if (this.wantsCrosshair()) this.scene.invalidate();
       if (this.panning) {
         this.view.panBy(event.offsetX - this.panning.x, event.offsetY - this.panning.y);
         this.panning = { x: event.offsetX, y: event.offsetY };
@@ -533,6 +543,10 @@ class Editor {
       }
       this.tool.pointerup(event);
     };
+    this.canvas.addEventListener("pointerleave", () => {
+      this.pointer = null;
+      this.scene.invalidate();
+    });
     this.canvas.addEventListener("pointerup", release);
     this.canvas.addEventListener("pointercancel", release);
 
@@ -540,7 +554,20 @@ class Editor {
       "wheel",
       (event) => {
         event.preventDefault();
-        this.view.zoomAt(event.offsetX, event.offsetY, Math.exp(-event.deltaY * 0.0015));
+        // Firefox reports lines, not pixels, and its zoom was a crawl.
+        const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? 400 : 1;
+        const dx = event.deltaX * unit;
+        const dy = event.deltaY * unit;
+        if (event.ctrlKey) {
+          // A trackpad pinch arrives as a ctrl+wheel with small deltas.
+          this.view.zoomAt(event.offsetX, event.offsetY, Math.exp(-dy * 0.01));
+        } else if (looksLikeTrackpad(event, dx, dy)) {
+          // Two fingers move the picture, as in every map and design tool;
+          // zooming on them made a trackpad unusable.
+          this.view.panBy(-dx, -dy);
+        } else {
+          this.view.zoomAt(event.offsetX, event.offsetY, Math.exp(-dy * 0.0015));
+        }
         this.scene.invalidate();
       },
       { passive: false }
@@ -578,9 +605,102 @@ class Editor {
         colourFor: (shape) => this.rail.colourFor(shape),
         visible: (shape) => this.visible(shape),
         draft,
+        crosshair: this.wantsCrosshair() ? this.pointer : null,
       });
     }
     requestAnimationFrame(() => this.frame());
+  }
+
+  // Guides show whenever the next left-drag would draw: over empty canvas,
+  // with a drawing tool, or mid-draw. Over a shape they would only be noise.
+  wantsCrosshair() {
+    if (!this.pointer || this.panning || this.spacePanning) return false;
+    return this.drawingBox || this.tool !== this.tools.select || this.scene.hover == null;
+  }
+
+  // -- editing from the keyboard -------------------------------------------
+
+  // Move the selection by whole image pixels: 1, or 10 with Shift. A held
+  // key extends one undo step rather than filling the stack with repeats.
+  nudge(dx, dy) {
+    const selected = this.scene.selected().filter((s) => this.visible(s));
+    if (!selected.length) return false;
+    const now = performance.now();
+    const ids = selected.map((s) => s.id).sort().join(",");
+    const last = this.lastNudge;
+    const extending =
+      last && last.ids === ids && now - last.at < 700 && this.undo.past.at(-1) === last.command;
+
+    const entries = extending ? last.command.entries : [];
+    for (const shape of selected) {
+      let entry = entries.find((e) => this.scene.resolve(e.id) === shape.id);
+      if (!entry) {
+        entry = { id: shape.id, before: snapshot(shape), after: null };
+        entries.push(entry);
+      }
+      shape.bbox = shape.bbox.map((v, i) => v + (i % 2 === 0 ? dx : dy));
+      if (shape.polygon) shape.polygon = shape.polygon.map(([x, y]) => [x + dx, y + dy]);
+      this.scene.clampShape(shape);
+      entry.after = snapshot(shape);
+      this.markEdited(shape);
+    }
+    this.scene.touch();
+    if (extending) {
+      last.at = now;
+    } else {
+      const command = changeMany(this.scene, entries);
+      this.undo.push(command);
+      this.lastNudge = { ids, at: now, command };
+    }
+    this.queueSave();
+    return true;
+  }
+
+  // Tab walks the visible shapes. The only way to reach a small box buried
+  // under a big one without moving the big one.
+  cycleSelection(direction) {
+    const ids = this.scene.order.filter((id) => this.visible(this.scene.get(id)));
+    if (!ids.length) return;
+    const current = this.scene.selection.size === 1 ? [...this.scene.selection][0] : null;
+    const at = current ? ids.indexOf(current) : -1;
+    const next = ids[(at + direction + ids.length) % ids.length] ?? ids[0];
+    this.scene.select(next);
+    this.onSelectionChanged();
+    const shape = this.scene.get(next);
+    const score = shape.confidence != null ? ` · ${Math.round(shape.confidence * 100)}%` : "";
+    this.say(`${shape.label}${score}`);
+  }
+
+  copySelection() {
+    const selected = this.scene.selected();
+    if (!selected.length) return;
+    this.clipboard = { imageId: this.scene.imageId, shapes: selected.map(cloneShape) };
+    this.say(`copied ${selected.length} shape(s) — Ctrl+V pastes, on this image or another`);
+  }
+
+  // Pasting onto another image lands in place -- the point is carrying a box
+  // to the next frame. On the same image it is offset, or the copy would sit
+  // exactly on its original and look like nothing happened.
+  pasteClipboard() {
+    if (!this.clipboard || !this.clipboard.shapes.length || !this.image) return;
+    const offset = this.clipboard.imageId === this.scene.imageId ? 10 : 0;
+    const pasted = this.clipboard.shapes.map((source) =>
+      this.scene.clampShape({
+        ...cloneShape(source),
+        id: draftId(),
+        bbox: source.bbox.map((v) => v + offset),
+        polygon: source.polygon ? source.polygon.map(([x, y]) => [x + offset, y + offset]) : null,
+        origin: "human",
+        confidence: null,
+        edited: false,
+      })
+    );
+    for (const shape of pasted) this.scene.add(shape);
+    this.undo.push(addMany(this.scene, pasted));
+    this.scene.clearSelection();
+    for (const shape of pasted) this.scene.select(shape.id, { additive: true });
+    this.queueSave();
+    this.say(`pasted ${pasted.length} shape(s)`);
   }
 
   // -- keyboard -----------------------------------------------------------
@@ -627,6 +747,45 @@ class Editor {
       if (ctrl && event.key.toLowerCase() === "d") {
         event.preventDefault();
         this.copyPrevious();
+        return;
+      }
+      if (ctrl && event.key.toLowerCase() === "c" && this.scene.selection.size) {
+        event.preventDefault();
+        this.copySelection();
+        return;
+      }
+      if (ctrl && event.key.toLowerCase() === "v") {
+        event.preventDefault();
+        this.pasteClipboard();
+        return;
+      }
+      if (ctrl && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        this.scene.clearSelection();
+        for (const id of this.scene.order) {
+          if (this.visible(this.scene.get(id))) this.scene.select(id, { additive: true });
+        }
+        return;
+      }
+      if (event.key === "Tab") {
+        event.preventDefault();
+        this.cycleSelection(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (event.key.startsWith("Arrow")) {
+        const step = event.shiftKey ? 10 : 1;
+        const [dx, dy] = {
+          ArrowLeft: [-step, 0],
+          ArrowRight: [step, 0],
+          ArrowUp: [0, -step],
+          ArrowDown: [0, step],
+        }[event.key] || [0, 0];
+        event.preventDefault();
+        // With nothing selected, arrows move the view instead.
+        if (!this.nudge(dx, dy)) {
+          this.view.panBy(-dx * 5, -dy * 5);
+          this.scene.invalidate();
+        }
         return;
       }
 
@@ -1015,6 +1174,15 @@ class Editor {
   say(message) {
     this.progress.textContent = message;
   }
+}
+
+// Mouse wheels step in large whole notches with no sideways component;
+// trackpads scroll in small, often fractional, two-axis deltas. A guess, but
+// a wrong guess costs one scroll, and always zooming made trackpads useless.
+function looksLikeTrackpad(event, dx, dy) {
+  if (event.deltaMode !== 0) return false;
+  if (dx !== 0) return true;
+  return Math.abs(dy) < 40 && !Number.isInteger(dy);
 }
 
 function isTypingTarget(node) {

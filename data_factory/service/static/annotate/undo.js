@@ -102,6 +102,18 @@ export function changeGeometry(scene, id, before, after) {
   };
 }
 
+// Several shapes changed by one gesture -- a nudge of a multi-selection.
+// `entries` is [{ id, before, after }] and stays mutable, so a held arrow key
+// can keep extending the same command instead of pushing one per repeat.
+export function changeMany(scene, entries) {
+  return {
+    label: "nudge",
+    entries,
+    do: () => entries.forEach((e) => apply(scene, e.id, e.after)),
+    undo: () => entries.forEach((e) => apply(scene, e.id, e.before)),
+  };
+}
+
 export function changeLabel(scene, id, before, after) {
   return {
     label: "change class",
