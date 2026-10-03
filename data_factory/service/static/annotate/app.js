@@ -62,6 +62,12 @@ class Editor {
     this.saveTimer = null;
     this.saving = null;
     this.pendingGeometry = null;
+    // True while the selection is only "the shape just drawn". It keeps its
+    // handles, so it can be resized at once, but it does not capture a class
+    // pick -- choosing the class for the *next* box must not re-class the
+    // last one -- and a drag across it draws rather than moves.
+    this.selectionFromDrawing = false;
+    this.pressed = null;
     this.spacePanning = false;
     // Client-side only: filtering predictions is a slider, and a round trip
     // per drag would make it feel broken.
@@ -363,7 +369,14 @@ class Editor {
       const payload = await this.api.labels(this.projectId);
       this.rail.setLabels(payload.labels);
       const made = payload.labels.find((l) => l.name === name.trim());
-      if (made) this.rail.pick(made);
+      if (made) {
+        this.rail.pick(made);
+        // Replace the "name this class" prompt: a hint still asking for a
+        // name after it was given reads as the name not having taken.
+        const position = this.rail.labels.indexOf(made);
+        const key = position >= 0 && position < 10 ? ` · key ${(position + 1) % 10}` : "";
+        this.say(`drawing "${made.name}"${key}`);
+      }
       // Hand the keyboard back to the canvas: naming a class is part of
       // drawing, and the next keystroke belongs to the drawing.
       this.rail.releaseInput();
@@ -455,10 +468,16 @@ class Editor {
       edited: false,
     });
     this.undo.run(addShape(this.scene, shape));
+    this.drew();
     this.queueSave();
   }
 
+  drew() {
+    this.selectionFromDrawing = true;
+  }
+
   assignClassToSelection(label) {
+    if (this.selectionFromDrawing) return false;
     const selected = this.scene.selected();
     if (!selected.length || !label) return false;
     let changed = 0;
@@ -491,6 +510,7 @@ class Editor {
   }
 
   onSelectionChanged() {
+    this.selectionFromDrawing = false;
     const selected = this.scene.selected();
     if (selected.length === 1) {
       const label = this.rail.labels.find((l) => l.idx === selected[0].labelIdx);
@@ -524,16 +544,25 @@ class Editor {
       // Right-click belongs to the context-menu delete. Letting it through
       // to the tools added a polygon vertex or started a box underneath it.
       if (event.button !== 0) return;
-      // Left-drag on empty canvas with the select tool draws a box: no mode
-      // to enter, which is the entire interaction argument of this product.
-      if (
-        event.button === 0 &&
-        this.tool === this.tools.select &&
-        !this.hitSomething(ix, iy)
-      ) {
-        this.tools.box.pointerdown(event, ix, iy);
-        this.drawingBox = true;
-        return;
+      // Left-drag with the select tool draws a box: no mode to enter, which
+      // is the entire interaction argument of this product. That includes a
+      // drag starting on a shape you have not selected -- a handle on a
+      // door, a plate on a car -- because nested objects are the common case,
+      // and having to switch tools to draw inside a box was the first thing
+      // to break the flow. A click there still selects; a drag on a shape
+      // you *have* selected moves it.
+      if (this.tool === this.tools.select) {
+        const hit = hitTest(this.scene, ix, iy, this.view.scale, (s) => this.visible(s));
+        if (!hit) {
+          this.tools.box.pointerdown(event, ix, iy);
+          this.drawingBox = true;
+          return;
+        }
+        const owned = this.scene.selection.has(hit.id) && !this.selectionFromDrawing;
+        if (hit.part === "body" && !owned && !event.shiftKey && !event.altKey) {
+          this.pressed = { id: hit.id, sx: event.offsetX, sy: event.offsetY, ix, iy };
+          return;
+        }
       }
       this.tool.pointerdown(event, ix, iy);
     });
@@ -548,6 +577,17 @@ class Editor {
         this.scene.invalidate();
         return;
       }
+      if (this.pressed) {
+        // Past a few pixels a press on a shape becomes a drawn box.
+        const { sx, sy } = this.pressed;
+        if (Math.hypot(event.offsetX - sx, event.offsetY - sy) > 4) {
+          this.tools.box.pointerdown(event, this.pressed.ix, this.pressed.iy);
+          this.drawingBox = true;
+          this.pressed = null;
+          this.tools.box.pointermove(event, ix, iy);
+        }
+        return;
+      }
       if (this.drawingBox) {
         this.tools.box.pointermove(event, ix, iy);
         return;
@@ -558,6 +598,14 @@ class Editor {
     const release = (event) => {
       if (this.panning) {
         this.panning = null;
+        return;
+      }
+      if (this.pressed) {
+        // It never moved: a click, so it selects.
+        const { id } = this.pressed;
+        this.pressed = null;
+        this.scene.select(id);
+        this.onSelectionChanged();
         return;
       }
       if (this.drawingBox) {
@@ -653,7 +701,10 @@ class Editor {
   // with a drawing tool, or mid-draw. Over a shape they would only be noise.
   wantsCrosshair() {
     if (!this.pointer || this.panning || this.spacePanning) return false;
-    return this.drawingBox || this.tool !== this.tools.select || this.scene.hover == null;
+    if (this.drawingBox || this.tool !== this.tools.select) return true;
+    // Wherever a drag would draw: empty canvas, or a shape not selected.
+    const hover = this.scene.hover;
+    return hover == null || !this.scene.selection.has(hover) || this.selectionFromDrawing;
   }
 
   // -- editing from the keyboard -------------------------------------------
@@ -737,6 +788,7 @@ class Editor {
     this.undo.push(addMany(this.scene, pasted));
     this.scene.clearSelection();
     for (const shape of pasted) this.scene.select(shape.id, { additive: true });
+    this.drew();
     this.queueSave();
     this.say(`pasted ${pasted.length} shape(s)`);
   }
@@ -803,6 +855,7 @@ class Editor {
         for (const id of this.scene.order) {
           if (this.visible(this.scene.get(id))) this.scene.select(id, { additive: true });
         }
+        this.onSelectionChanged();
         return;
       }
       if (event.key === "Tab") {

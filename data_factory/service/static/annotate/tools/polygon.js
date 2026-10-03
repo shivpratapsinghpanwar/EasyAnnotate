@@ -46,6 +46,7 @@ export function create(editor) {
       edited: false,
     });
     editor.undo.run(addShape(editor.scene, shape));
+    editor.drew();
     editor.queueSave();
   }
 

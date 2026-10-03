@@ -503,6 +503,9 @@ def test_undo_still_works_after_autosave_renames_the_shape(browser, service, bar
 
         # Move it before the first autosave, so the move is recorded against
         # the draft id -- then let the save rename the shape underneath it.
+        # Click first: a drag across a just-drawn box draws, it does not move.
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.click(rect["x"] + 400, rect["y"] + 330)
         drag(page, 400, 330, 470, 390)
         assert page.evaluate("window.__editor.scene.order[0]").startswith("draft-")
         page.wait_for_timeout(900)
@@ -663,8 +666,14 @@ def test_guides_show_over_empty_canvas_only(browser, service, bare_images):
         page.mouse.move(rect["x"] + 100, rect["y"] + 100)
         assert page.evaluate("window.__editor.wantsCrosshair()")
         _draw_named_box(page)
-        page.mouse.move(rect["x"] + 400, rect["y"] + 330)  # over the box
+        page.mouse.move(rect["x"] + 400, rect["y"] + 330)  # over the new box
         page.wait_for_timeout(100)
+        # A drag here would draw a nested box, so the guides stay.
+        assert page.evaluate("window.__editor.wantsCrosshair()")
+        page.mouse.click(rect["x"] + 400, rect["y"] + 330)  # now it is selected
+        page.mouse.move(rect["x"] + 405, rect["y"] + 335)
+        page.wait_for_timeout(100)
+        # A drag here moves it: guides would only be noise.
         assert not page.evaluate("window.__editor.wantsCrosshair()")
     finally:
         page.close()
@@ -684,6 +693,8 @@ def test_typing_a_case_variant_picks_the_existing_class(browser, service, bare_i
         _draw_named_box(page, "Open")
         page.keyboard.press("Escape")
         drag(page, 560, 250, 700, 400)  # drawn as Open, then re-classed below
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.click(rect["x"] + 630, rect["y"] + 320)  # select it explicitly
         page.keyboard.press("/")
         page.keyboard.type("open")
         page.keyboard.press("Enter")
@@ -830,6 +841,54 @@ def test_brightness_is_applied_and_remembered(browser, service, bare_images):
         page.reload(wait_until="networkidle")
         page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
         assert page.evaluate("window.__editor.imageFilter()") == "brightness(180%) contrast(100%)"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+# ------------------------------------------------- M1: the drawing flow
+
+
+def test_choosing_the_next_class_leaves_the_last_box_alone(browser, service, bare_images):
+    """Pick a class, draw; pick the next, draw. A new box stays selected so it
+    can be resized -- but picking the next class must not re-class it."""
+    errors: list[str] = []
+    project = make_project(service, bare_images, "flow")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Door")
+        page.keyboard.press("/")
+        page.keyboard.type("Handle")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(600)
+        assert page.evaluate(
+            "[...window.__editor.scene.shapes.values()].map(s => s.label)"
+        ) == ["Door"]
+        assert page.evaluate("window.__editor.rail.current.name") == "Handle"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_box_can_be_drawn_inside_another(browser, service, bare_images):
+    """A handle on a door: dragging inside an existing box draws a new one.
+    It used to move the door."""
+    errors: list[str] = []
+    project = make_project(service, bare_images, "nested")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Door", (300, 200, 600, 520))
+        door = _shape_boxes(page)[0]
+        drag(page, 520, 340, 570, 390)
+        page.wait_for_timeout(900)
+        boxes = _shape_boxes(page)
+        assert len(boxes) == 2 and boxes[0] == door
+
+        # A click selects; then dragging that shape moves it.
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.click(rect["x"] + 330, rect["y"] + 230)
+        drag(page, 330, 230, 360, 260)
+        assert _shape_boxes(page)[0] != door
     finally:
         page.close()
     assert not errors, errors
