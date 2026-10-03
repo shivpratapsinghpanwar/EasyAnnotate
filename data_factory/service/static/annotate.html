@@ -132,6 +132,12 @@
   .label-item[data-hidden="true"] [data-role="eye"] { color: var(--warn); }
   .label-item[data-highlight="true"] { outline: 1px dashed var(--accent); }
 
+  .flags { padding: 6px 10px; display: flex; flex-wrap: wrap; gap: 4px 12px; font-size: 12px; }
+  .flags label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+  .sliders {
+    padding: 6px 10px; display: grid; grid-template-columns: auto 1fr; gap: 2px 8px;
+    align-items: center; font-size: 11px; color: var(--dim);
+  }
   #shapes [data-role="shape-list"] { overflow-y: auto; max-height: 28vh; padding: 4px 6px; }
   .shape-item {
     display: grid; grid-template-columns: 12px 1fr auto; gap: 7px; align-items: center;
@@ -217,6 +223,15 @@
     </div>
     <div data-role="label-list"></div>
 
+    <div id="attributes" hidden>
+      <div class="panel-head" style="border-top:1px solid var(--line)">Selected</div>
+      <div class="flags">
+        <label><input type="checkbox" data-attr="occluded"> occluded</label>
+        <label><input type="checkbox" data-attr="truncated"> truncated</label>
+        <label><input type="checkbox" data-attr="difficult"> difficult</label>
+      </div>
+    </div>
+
     <div id="shapes">
       <div class="panel-head" style="border-top:1px solid var(--line)">
         On this image <span data-role="shape-count"></span>
@@ -242,6 +257,16 @@
         <button id="btn-accept" style="width:100%;margin-top:8px">
           Accept all &amp; next <kbd>A</kbd>
         </button>
+      </div>
+    </div>
+
+    <div id="look">
+      <div class="panel-head" style="border-top:1px solid var(--line)">View</div>
+      <div class="sliders">
+        <label for="brightness">brightness</label>
+        <input id="brightness" type="range" min="30" max="300" value="100" title="Double-click to reset">
+        <label for="contrast">contrast</label>
+        <input id="contrast" type="range" min="30" max="300" value="100" title="Double-click to reset">
       </div>
     </div>
 

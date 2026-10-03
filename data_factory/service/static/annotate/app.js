@@ -22,6 +22,7 @@ import {
   UndoStack,
   addMany,
   addShape,
+  changeAttributes,
   changeLabel,
   changeMany,
   removeShape,
@@ -77,6 +78,7 @@ class Editor {
     // changes nothing anyone else sees and nothing that is exported.
     this.hiddenClasses = new Set(readPreference(`hidden:${this.projectId}`, []));
     this.hideAll = false;
+    this.look = readPreference(`look:${this.projectId}`, { brightness: 100, contrast: 100 });
 
     this.rail = new LabelRail(document.getElementById("labels"), {
       // Picking a class draws a held shape if there is one, and otherwise
@@ -635,8 +637,10 @@ class Editor {
         visible: (shape) => this.visible(shape),
         draft,
         crosshair: this.wantsCrosshair() ? this.pointer : null,
+        imageFilter: this.imageFilter(),
       });
     }
+    this.updateAttributePanel();
     this.shapeList.update(
       this.scene,
       (shape) => this.visible(shape),
@@ -958,6 +962,29 @@ class Editor {
       button.addEventListener("click", () => this.setTool(button.dataset.tool));
     }
 
+    for (const key of ["brightness", "contrast"]) {
+      const control = document.getElementById(key);
+      control.value = String(this.look[key]);
+      control.addEventListener("input", () => {
+        this.look = { ...this.look, [key]: Number(control.value) };
+        writePreference(`look:${this.projectId}`, this.look);
+        this.scene.invalidate();
+      });
+      control.addEventListener("change", () => control.blur());
+      // Double-click puts it back, the quickest way out of a bad adjustment.
+      control.addEventListener("dblclick", () => {
+        control.value = "100";
+        control.dispatchEvent(new Event("input"));
+      });
+    }
+
+    for (const box of document.querySelectorAll("#attributes [data-attr]")) {
+      box.addEventListener("change", () => {
+        this.setAttribute(box.dataset.attr, box.checked);
+        box.blur();
+      });
+    }
+
     const slider = document.getElementById("conf");
     slider.addEventListener("input", () => {
       this.minConfidence = Number(slider.value) / 100;
@@ -984,6 +1011,43 @@ class Editor {
   // A shape hidden by the confidence slider is not deleted, only unseen: the
   // filter is a way of looking, not an edit. Accepting an image is what turns
   // what you can see into what you keep.
+  imageFilter() {
+    const { brightness, contrast } = this.look;
+    if (brightness === 100 && contrast === 100) return "";
+    return `brightness(${brightness}%) contrast(${contrast}%)`;
+  }
+
+  // -- attributes -----------------------------------------------------------
+
+  // Shown for a selection, so the flags of what you are looking at are one
+  // click away -- and set on every selected shape at once.
+  updateAttributePanel() {
+    const selected = this.scene.selected();
+    const signature = `${this.scene.revision}|${selected.map((s) => s.id).join(",")}`;
+    if (signature === this.attributeSignature) return;
+    this.attributeSignature = signature;
+    const panel = document.getElementById("attributes");
+    panel.hidden = selected.length === 0;
+    for (const box of panel.querySelectorAll("[data-attr]")) {
+      const values = selected.map((s) => Number((s.attributes || {})[box.dataset.attr] || 0));
+      box.checked = values.length > 0 && values.every(Boolean);
+      box.indeterminate = values.some(Boolean) && !box.checked;
+    }
+  }
+
+  setAttribute(key, on) {
+    const selected = this.scene.selected();
+    if (!selected.length) return;
+    for (const shape of selected) {
+      const before = { ...(shape.attributes || {}) };
+      const after = { ...before, [key]: on ? 1 : 0 };
+      if (Number(before[key] || 0) === after[key]) continue;
+      this.undo.run(changeAttributes(this.scene, shape.id, before, after));
+      this.markEdited(shape);
+    }
+    this.queueSave();
+  }
+
   passesConfidence(shape) {
     if (shape.confidence == null) return true;
     return shape.confidence >= this.minConfidence;

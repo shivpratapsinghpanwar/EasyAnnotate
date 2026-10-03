@@ -789,3 +789,47 @@ def test_the_filmstrip_reaches_past_two_thousand_images(browser, service, tmp_pa
     finally:
         page.close()
     assert not errors, errors
+
+
+# --------------------------------------------- M1: attributes and the view
+
+
+def _stored_shapes(service, project_id, image_id):
+    with httpx.Client(base_url=service, timeout=30) as client:
+        return client.get(f"/api/projects/{project_id}/images/{image_id}").json()["shapes"]
+
+
+def test_flags_are_set_from_the_panel_saved_and_undoable(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "flags")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page)
+        image_id = page.evaluate("window.__editor.scene.imageId")
+        assert page.is_visible("#attributes")
+
+        page.check("#attributes [data-attr=occluded]")
+        page.wait_for_timeout(900)
+        assert _stored_shapes(service, project["id"], image_id)[0]["occluded"] == 1
+
+        page.keyboard.press("Control+z")
+        page.wait_for_timeout(900)
+        assert _stored_shapes(service, project["id"], image_id)[0]["occluded"] == 0
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_brightness_is_applied_and_remembered(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "look")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        page.locator("#brightness").fill("180")
+        assert page.evaluate("window.__editor.imageFilter()") == "brightness(180%) contrast(100%)"
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        assert page.evaluate("window.__editor.imageFilter()") == "brightness(180%) contrast(100%)"
+    finally:
+        page.close()
+    assert not errors, errors

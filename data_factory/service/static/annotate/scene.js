@@ -205,6 +205,9 @@ export class Scene {
         bbox: shape.bbox,
         polygon: shape.polygon,
         confidence: shape.confidence ?? null,
+        // Always complete. The server reads a missing attribute as "keep
+        // what you have", so omitting one here could never turn a flag off.
+        ...ATTRIBUTE_DEFAULTS,
         ...(shape.attributes || {}),
       };
     });
@@ -226,7 +229,8 @@ export function rebuildBox(shape) {
   return shape;
 }
 
-export const ATTRIBUTE_KEYS = ["pose", "truncated", "difficult", "occluded"];
+export const ATTRIBUTE_DEFAULTS = { pose: "Unspecified", truncated: 0, difficult: 0, occluded: 0 };
+export const ATTRIBUTE_KEYS = Object.keys(ATTRIBUTE_DEFAULTS);
 
 export function attributesOf(raw) {
   const out = {};

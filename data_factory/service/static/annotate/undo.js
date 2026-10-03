@@ -134,6 +134,17 @@ export function changeLabel(scene, id, before, after) {
   };
 }
 
+// Occluded, truncated, difficult: flags on the box rather than more classes.
+export function changeAttributes(scene, id, before, after) {
+  const set = (value) => {
+    const shape = scene.get(id);
+    if (!shape) return;
+    shape.attributes = { ...value };
+    scene.touch();
+  };
+  return { label: "change attribute", do: () => set(after), undo: () => set(before) };
+}
+
 export function addMany(scene, shapes) {
   const copies = shapes.map(cloneShape);
   return {

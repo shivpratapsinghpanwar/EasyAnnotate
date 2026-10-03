@@ -29,6 +29,9 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
   ctx.scale(view.scale, view.scale);
 
   if (mips && mips.length) {
+    // Brightness and contrast touch the picture only, never the outlines --
+    // a box must stay the same colour however dark the scene is made.
+    if (options.imageFilter) ctx.filter = options.imageFilter;
     // Pick by *device* pixels. Choosing by CSS pixels on a 2x screen draws
     // from a mip at half the resolution the display can show -- every fine
     // edge comes out soft, exactly where a tight box needs to see it.
@@ -41,6 +44,7 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
       ctx.imageSmoothingEnabled = true;
       ctx.drawImage(mip, 0, 0, mip.width, mip.height, 0, 0, view.width, view.height);
     }
+    ctx.filter = "none";
   }
 
   // Every stroke is divided by the scale so it stays two screen pixels wide at
