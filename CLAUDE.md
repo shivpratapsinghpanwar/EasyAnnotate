@@ -87,8 +87,9 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ```bash
 .\.venv\Scripts\activate
-datafactory serve                 # http://localhost:8765
-datafactory annotate <folder>     # edit a folder's labels in place
+easyannotate demo                 # sample project in the browser
+easyannotate serve                # http://localhost:8765
+easyannotate annotate <folder>    # edit a folder's labels in place
 python -m pytest                  # 649; 24 browser tests skip without playwright
 ```
 

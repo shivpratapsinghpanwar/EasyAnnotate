@@ -1,16 +1,54 @@
-# Data Factory
+# EasyAnnotate
 
-Dataset preparation for computer vision — convert, clean, preprocess, augment,
-analyse and export — as **one tool** with a library, a CLI, an interactive menu,
-and a YAML pipeline runner over a single shared core.
+![EasyAnnotate: draw, name a class, review a model's predictions, export](docs/demo.gif)
 
-*Author: Shivpratap Singh Panwar. Originally
-created 22 July 2026 as a folder of task-specific scripts; consolidated into
-this package.*
+**Image annotation with nothing to set up.** Open a folder, draw a box, type a
+class name — that is the whole workflow. Load a model's predictions and review
+them at a few images a minute. Export a dataset that is correct by construction.
+
+```bash
+pip install easyannotate
+easyannotate demo                  # a sample project opens in your browser
+easyannotate annotate ./my-images  # your own folder: labels are written in place
+```
+
+No account, no server, no Docker, no project template, no label schema. Your
+images never leave your machine. Python 3.12+, Windows, macOS and Linux.
+
+*Author: Shivpratap Singh Panwar.*
 
 ---
 
-## Why one tool
+## Why this exists
+
+CVAT makes you create an organisation, then a project, then labels, then a task
+and jobs before you can draw one box. Label Studio wants a labelling config.
+Roboflow wants your images in its cloud. EasyAnnotate's rule, which every
+feature is subordinate to:
+
+> **If a feature requires you to configure something before you can draw a
+> box, it does not ship.**
+
+What you get instead:
+
+- **A class is created by using it.** Draw, type a name, Enter. Typing `open`
+  when `Open` exists picks `Open` — the `Close/close` split that ruins real
+  datasets cannot happen by accident.
+- **No Save button.** Edits are saved 400ms after you stop and before you
+  navigate. Reopening a project resumes on the first unfinished image.
+- **The model loop is the product.** Import predictions from any YOLO, COCO,
+  VOC or LabelMe run; they arrive dashed with a confidence slider; `A` accepts
+  an image. An agreement figure tells you when to retrain and when to stop.
+- **Exports are correct.** YOLO class indices never move when you rename or
+  retire a class. Export defaults to reviewed images only, so unreviewed model
+  output can never silently become training data.
+- **Dataset tooling built in.** 28 operations — convert between five formats,
+  find duplicates and train/val leakage, health reports, augmentation that
+  moves the labels with the pixels — one `pip install` away.
+
+---
+
+## One core, four front ends
 
 The original `Power_tools/` folder held fifteen scripts. Each hardcoded its
 paths at the top, each re-implemented "find the image that matches this XML",
@@ -50,30 +88,29 @@ everywhere.
 ## Install
 
 ```bash
-pip install data-factory                 # library + CLI
-pip install "data-factory[web]"          # + the local web interface
-uv tool install "data-factory[web]"      # isolated, on PATH
-uvx --from "data-factory[web]" datafactory serve   # run once, install nothing
+pip install easyannotate                 # everything: editor, CLI, service
+uv tool install easyannotate             # isolated, on PATH
+uvx easyannotate demo                    # run once, install nothing
 ```
 
-Python 3.12+. The core needs only numpy, Pillow, OpenCV, imagehash and PyYAML —
-deliberately no PyTorch, so a CI box or web backend installs it in seconds.
+Python 3.12+. Needs only numpy, Pillow, OpenCV, imagehash, PyYAML and FastAPI —
+deliberately no PyTorch, so it installs in seconds anywhere.
 
 **OpenCV is the headless build by default.** The ordinary `opencv-python` wheel
 links against `libGL.so.1`, which slim containers, Cloud Run and most CI images
 do not have — it installs fine and then throws `ImportError` on exactly the
 machines a backend runs on. Only `collect.webcam`'s preview needs a GUI, and it
 falls back to timer capture with a warning. For the preview:
-`pip install "data-factory[gui]"`.
-
-Optional extras: `web` (FastAPI service), `gui` (preview window), `dev` (tests
-and linting).
+`pip install "easyannotate[gui]"`.
 
 There is deliberately no `sam` extra. Model-backed tools run in a **separate
 process with their own interpreter**, discovered at runtime and absent without
 complaint — so torch's version matrix never has to agree with this package's.
 Point `DATAFACTORY_TOOLS_MODULE` at one to enable it; with none installed,
 `GET /api/tools` returns an empty list and the editor is fully usable.
+
+The Python package is `data_factory`, and `easyannotate` still works as a
+command — the tool was named EasyAnnotate before the editor became the point.
 
 ---
 
@@ -83,31 +120,31 @@ Point `DATAFACTORY_TOOLS_MODULE` at one to enable it; with none installed,
 operations preview before they ask.
 
 ```bash
-datafactory
+easyannotate
 ```
 
 **2. Command line** — for scripting and repeatability.
 
 ```bash
-datafactory list                          # every operation
-datafactory explain augment.dataset       # full help for one
+easyannotate list                          # every operation
+easyannotate explain augment.dataset       # full help for one
 
-datafactory convert.detect --folder ./mystery-dataset
-datafactory inspect.health --folder ./data
-datafactory convert.dataset --folder ./voc --output ./yolo --to yolo
-datafactory augment.dataset --folder ./train --output ./aug --multiplier 3 --dry-run
+easyannotate convert.detect --folder ./mystery-dataset
+easyannotate inspect.health --folder ./data
+easyannotate convert.dataset --folder ./voc --output ./yolo --to yolo
+easyannotate augment.dataset --folder ./train --output ./aug --multiplier 3 --dry-run
 ```
 
 **3. Recipes** — a dataset build written down, so it is reproducible.
 
 ```bash
-datafactory run recipes/train_ready_yolo.yaml --set root=D:/data --set out=D:/build
+easyannotate run recipes/train_ready_yolo.yaml --set root=D:/data --set out=D:/build
 ```
 
 **4. Browser** — a local web interface, which doubles as the desktop app.
 
 ```bash
-datafactory serve                 # opens http://localhost:8765
+easyannotate serve                 # opens http://localhost:8765
 ```
 
 Drop in a zip, it detects the format, and every operation appears as a form
@@ -118,7 +155,7 @@ The same code hosts the service — see [DEPLOYING.md](DEPLOYING.md).
 
 ## Annotating
 
-`datafactory serve`, drop in a folder, click **Start annotating**. That is the
+`easyannotate serve`, drop in a folder, click **Start annotating**. That is the
 whole setup. There is no organisation to create, no project template, no task,
 no label schema — **a class is created by drawing a box and typing its name.**
 
@@ -152,7 +189,7 @@ Export goes back through an ordinary operation, so it has a dry run, progress
 and recipe support like everything else:
 
 ```bash
-datafactory annotate.export --database ~/.datafactory/annotations.db \
+easyannotate annotate.export --database ~/.easyannotate/annotations.db \
     --project <id> --output ./train-set --to yolo
 ```
 
@@ -163,7 +200,7 @@ and nothing about the output looks wrong when it happens.
 ### Annotating a folder in place
 
 ```bash
-datafactory annotate ./my-dataset
+easyannotate annotate ./my-dataset
 ```
 
 No copy is made. The folder's own label files are **updated as you draw** —
@@ -207,7 +244,7 @@ at 100%.
 One turn of the loop is written down as a recipe:
 
 ```bash
-datafactory run recipes/model_loop.yaml --set project=<id> --set out=./round-2
+easyannotate run recipes/model_loop.yaml --set project=<id> --set out=./round-2
 ```
 
 Export reviewed → check classes and health → split → check leakage → convert →
@@ -301,7 +338,7 @@ slot, a new class is appended. For datasets without a project, pass the same
 | `collect.frames` | Video (or a folder of videos) → numbered JPEG frames |
 | `collect.webcam` | Capture stills from a camera, manually or on a timer |
 
-Operations marked `!` in `datafactory list` write to disk. All accept `--dry-run`.
+Operations marked `!` in `easyannotate list` write to disk. All accept `--dry-run`.
 
 ---
 
@@ -337,7 +374,7 @@ consumer; a web API is another.
 Run on the real Project_Door V3 set (3,686 images, 3,871 objects):
 
 ```
-$ datafactory inspect.health --folder ./pascal_voc
+$ easyannotate inspect.health --folder ./pascal_voc
 
 [error] Classes differing only by capitalisation
    Open / open; Close / close
@@ -404,7 +441,7 @@ df.run("augment.dataset", {"folder": "./train", "output": "./aug"}, ctx)
 A front-end can build its own forms without importing Python at all:
 
 ```bash
-datafactory schema --output schema.json
+easyannotate schema --output schema.json
 ```
 
 That file describes every operation, every parameter, its kind (`dir`, `int`,
@@ -416,12 +453,12 @@ That file describes every operation, every parameter, its kind (`dir`, `int`,
 ## Provenance
 
 Every operation that writes a dataset appends one line to
-`<output>/.datafactory/history.jsonl`. It is recorded in `Operation.run`, not by
+`<output>/.easyannotate/history.jsonl`. It is recorded in `Operation.run`, not by
 the operations themselves, so no operation can forget and a new one gets it
 without asking.
 
 ```bash
-datafactory inspect.history --folder ./final
+easyannotate inspect.history --folder ./final
 ```
 
 It answers the questions that are otherwise unanswerable six weeks later: was

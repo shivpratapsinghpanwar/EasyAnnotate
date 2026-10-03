@@ -45,7 +45,7 @@ def workspace() -> Path:
         base = Path.home() / "Library" / "Application Support"
     else:
         base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    path = base / "DataFactory" / "workspaces"
+    path = base / "EasyAnnotate" / "workspaces"
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -55,11 +55,13 @@ def main() -> int:
     port = free_port(PREFERRED_PORT)
     url = f"http://127.0.0.1:{port}"
 
-    print("Data Factory")
-    print(f"  interface : {url}")
-    print(f"  datasets  : {os.environ['DATAFACTORY_WORKSPACE']}")
-    print("  close this window to quit")
-    print()
+    # Flushed: when the console is a pipe the banner would otherwise sit in a
+    # buffer until exit, and the one thing a launcher must do is say its URL.
+    print("EasyAnnotate", flush=True)
+    print(f"  interface : {url}", flush=True)
+    print(f"  datasets  : {os.environ['DATAFACTORY_WORKSPACE']}", flush=True)
+    print("  close this window to quit", flush=True)
+    print(flush=True)
 
     threading.Timer(1.2, lambda: webbrowser.open(url)).start()
 

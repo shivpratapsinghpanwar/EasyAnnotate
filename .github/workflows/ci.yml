@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    name: tests (${{ matrix.os }}, py${{ matrix.python }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python }}
+          enable-cache: true
+      - run: uv sync --all-extras
+      # The editor is the product, so its browser tests run in CI rather than
+      # skipping when nobody installed a browser.
+      - run: uv run python -m playwright install --with-deps chromium
+        if: runner.os == 'Linux'
+      - run: uv run python -m playwright install chromium
+        if: runner.os == 'Windows'
+      - run: uv run python -m pytest -o addopts= -q -p no:warnings
+      - run: uv run ruff check --select F data_factory tests
+
+  package:
+    name: wheel installs and runs
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv build
+      # Into an empty environment, as a user would -- never from the checkout.
+      - run: |
+          uv venv /tmp/clean
+          /tmp/clean/bin/python -m pip install --quiet dist/*.whl || uv pip install --python /tmp/clean/bin/python dist/*.whl
+          /tmp/clean/bin/easyannotate --version
+          /tmp/clean/bin/easyannotate list | head -5
+          /tmp/clean/bin/python -c "import data_factory.service.app, data_factory.annotate.demo"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+  docker:
+    name: docker image boots
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t easyannotate .
+      - run: |
+          docker run -d --name ea -p 8000:8000 -v ea-data:/data easyannotate
+          for i in $(seq 1 30); do
+            curl -fs http://127.0.0.1:8000/api/health && break
+            sleep 1
+          done
+          curl -fs http://127.0.0.1:8000/api/health
+          # The annotation database must land inside the volume, writable.
+          docker exec ea sh -c 'test -w /data && ls -la /data'
+          docker logs ea

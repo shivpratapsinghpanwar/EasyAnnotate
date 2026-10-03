@@ -1,15 +1,15 @@
-# PyInstaller spec for a standalone Data Factory desktop build.
+# PyInstaller spec for a standalone EasyAnnotate desktop build.
 #
-#   pip install pyinstaller "data-factory[web]"
-#   pyinstaller packaging/datafactory.spec
+#   pip install pyinstaller easyannotate
+#   pyinstaller packaging/easyannotate.spec
 #
-# Produces dist/DataFactory/DataFactory.exe (or the platform equivalent), which
+# Produces dist/EasyAnnotate/EasyAnnotate.exe (or the platform equivalent), which
 # launches the local server and opens a browser -- no Python needed on the
 # target machine.
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
 
 ROOT = Path(SPECPATH).parent
 
@@ -37,6 +37,9 @@ datas = [
     (str(ROOT / "data_factory" / "service" / "static"), "data_factory/service/static"),
 ]
 datas += collect_data_files("data_factory")
+# The version is read from package metadata at runtime. Without the dist-info
+# the frozen build reports 0.0.0+source from --version and /api/health.
+datas += copy_metadata("easyannotate")
 
 analysis = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
@@ -60,7 +63,7 @@ exe = EXE(
     analysis.scripts,
     [],
     exclude_binaries=True,
-    name="DataFactory",
+    name="EasyAnnotate",
     debug=False,
     strip=False,
     upx=False,          # UPX-packed binaries trip antivirus heuristics
@@ -73,5 +76,5 @@ COLLECT(
     analysis.datas,
     strip=False,
     upx=False,
-    name="DataFactory",
+    name="EasyAnnotate",
 )

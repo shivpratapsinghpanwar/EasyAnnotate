@@ -1,4 +1,4 @@
-# Deploying and distributing Data Factory
+# Deploying and distributing EasyAnnotate
 
 Four ways people will get this, in the order they matter.
 
@@ -7,18 +7,17 @@ Four ways people will get this, in the order they matter.
 ## 1. `pip` / `uv` — the developer path
 
 ```bash
-pip install data-factory                 # library + CLI
-pip install "data-factory[web]"          # + the local web interface
-uv tool install "data-factory[web]"      # isolated, on PATH, no venv to manage
-uvx --from "data-factory[web]" datafactory serve   # run once, install nothing
+pip install easyannotate                 # everything
+uv tool install easyannotate             # isolated, on PATH, no venv to manage
+uvx easyannotate demo                    # run once, install nothing
 ```
 
 Then:
 
 ```bash
-datafactory list
-datafactory inspect.health --folder ./data
-datafactory serve
+easyannotate list
+easyannotate inspect.health --folder ./data
+easyannotate serve
 ```
 
 **Why the default install is headless.** The dependency is
@@ -31,7 +30,7 @@ window needs a GUI, and it degrades to timer capture with a warning when the
 headless build is present. If you want the preview:
 
 ```bash
-pip install "data-factory[gui]"          # replaces the headless wheel
+pip install "easyannotate[gui]"          # replaces the headless wheel
 ```
 
 Do not install both into one environment; they provide the same `cv2` module.
@@ -41,12 +40,12 @@ Do not install both into one environment; they provide the same `cv2` module.
 ## 2. Docker — the hosting path
 
 ```bash
-docker build -t datafactory .
+docker build -t easyannotate .
 docker run -d -p 8000:8000 \
   -e DATAFACTORY_API_KEY="$(openssl rand -hex 24)" \
   -e DATAFACTORY_ORIGINS="https://annotationfree4u.com" \
-  -v datafactory-data:/data \
-  datafactory
+  -v easyannotate-data:/data \
+  easyannotate
 ```
 
 The image is small because the core has no PyTorch dependency — that is the
@@ -56,7 +55,7 @@ payoff for keeping SAM in an optional extra.
 
 | Variable | Default | What it does |
 |---|---|---|
-| `DATAFACTORY_WORKSPACE` | `~/.datafactory/workspaces` | where uploads live. The annotation database and project media go in its **parent**, so keep it one level inside your volume (the image uses `/data/workspaces`) |
+| `DATAFACTORY_WORKSPACE` | `~/.easyannotate/workspaces` | where uploads live. The annotation database and project media go in its **parent**, so keep it one level inside your volume (the image uses `/data/workspaces`) |
 | `DATAFACTORY_TTL_HOURS` | `24` | how long an anonymous dataset survives |
 | `DATAFACTORY_API_KEY` | *(unset)* | if set, `/api/*` requires `X-API-Key` |
 | `DATAFACTORY_ORIGINS` | *(unset)* | comma-separated CORS origins |
@@ -88,11 +87,11 @@ covering these specifically, most of them asserting a refusal.
 
 ---
 
-## 3. Desktop — `datafactory serve`
+## 3. Desktop — `easyannotate serve`
 
 ```bash
-datafactory serve                 # opens http://localhost:8765 in your browser
-datafactory serve --port 9000 --workspace D:/datasets --no-browser
+easyannotate serve                 # opens http://localhost:8765 in your browser
+easyannotate serve --port 9000 --workspace D:/datasets --no-browser
 ```
 
 A local server plus the system browser, which is how Jupyter and Netron ship.
@@ -110,10 +109,10 @@ When you want an `.exe` that needs no Python:
 
 ```bash
 pip install pyinstaller
-pyinstaller packaging/datafactory.spec
+pyinstaller packaging/easyannotate.spec
 ```
 
-Produces `dist/DataFactory/DataFactory.exe`. Notes that will save you a day:
+Produces `dist/EasyAnnotate/EasyAnnotate.exe`. Notes that will save you a day:
 
 - OpenCV and PyYAML need explicit hidden imports; the spec has them.
 - The bundle is ~150 MB, mostly numpy and OpenCV. That is normal.

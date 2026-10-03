@@ -1,8 +1,8 @@
-# Data Factory, as a hosted service.
+# EasyAnnotate, as a hosted service.
 #
-#   docker build -t datafactory .
+#   docker build -t easyannotate .
 #   docker run -p 8000:8000 -e DATAFACTORY_API_KEY=change-me \
-#              -v datafactory-data:/data datafactory
+#              -v easyannotate-data:/data easyannotate
 #
 # Two stages so the runtime image carries no build toolchain. The result is
 # small because the core deliberately has no PyTorch dependency -- that is the
