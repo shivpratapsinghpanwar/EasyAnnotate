@@ -11,7 +11,7 @@
 import { readableOn } from "./render.js";
 
 export class LabelRail {
-  constructor(root, { onPick, onCreate, onRename, onRetire }) {
+  constructor(root, { onPick, onCreate, onRename, onRetire, onToggleHidden }) {
     this.root = root;
     this.list = root.querySelector('[data-role="label-list"]');
     this.template = root.querySelector('[data-role="label-item"]');
@@ -20,25 +20,69 @@ export class LabelRail {
     this.onCreate = onCreate;
     this.onRename = onRename;
     this.onRetire = onRetire;
+    this.onToggleHidden = onToggleHidden || (() => {});
     this.labels = [];
     this.current = null;
+    this.hidden = new Set();
+    // What is typed filters the list, and arrows walk what is left. Past ten
+    // classes the number row runs out, and scrolling a list for "Handle" is
+    // slower than typing "han".
+    this.filter = "";
+    this.highlight = -1;
+
+    this.input.addEventListener("input", () => {
+      this.filter = this.input.value.trim().toLowerCase();
+      this.highlight = -1;
+      this.render();
+    });
 
     this.input.addEventListener("keydown", (event) => {
       if (event.key === "Enter") {
-        const name = this.input.value.trim();
-        if (name) {
-          this.input.value = "";
-          this.onCreate(name);
-        }
         event.preventDefault();
-      }
-      if (event.key === "Escape") {
-        this.input.value = "";
-        this.input.blur();
+        this.commit(this.input.value.trim());
+      } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const matches = this.matches();
+        if (matches.length) {
+          const step = event.key === "ArrowDown" ? 1 : -1;
+          this.highlight = (this.highlight + step + matches.length) % matches.length;
+          this.render();
+        }
+      } else if (event.key === "Escape") {
+        this.releaseInput();
       }
       // Number keys must reach the canvas, not this field.
       event.stopPropagation();
     });
+  }
+
+  matches() {
+    if (!this.filter) return this.labels;
+    return this.labels.filter((l) => l.name.toLowerCase().includes(this.filter));
+  }
+
+  // Enter in the class box. An existing class wins over making a new one --
+  // **matched without regard to case**. Typing "open" while "Open" exists and
+  // getting a second class is precisely how the door set came to hold
+  // Close/close/Open/open, and every export after that splits one class in
+  // two. Making a case variant is still possible: rename one afterwards.
+  commit(name) {
+    if (!name) return;
+    const matches = this.matches();
+    const exact = this.labels.find((l) => l.name.toLowerCase() === name.toLowerCase());
+    const chosen = exact || (this.highlight >= 0 ? matches[this.highlight] : null);
+    if (chosen) {
+      this.releaseInput();
+      this.pick(chosen);
+      return;
+    }
+    this.releaseInput();
+    this.onCreate(name);
+  }
+
+  setHidden(hidden) {
+    this.hidden = new Set(hidden);
+    this.render();
   }
 
   focusInput() {
@@ -53,6 +97,11 @@ export class LabelRail {
   releaseInput() {
     this.input.value = "";
     this.input.blur();
+    if (this.filter || this.highlight >= 0) {
+      this.filter = "";
+      this.highlight = -1;
+      this.render();
+    }
   }
 
   setLabels(labels) {
@@ -89,12 +138,15 @@ export class LabelRail {
 
   render() {
     this.list.replaceChildren();
+    const matches = this.matches();
+    const highlighted = this.highlight >= 0 ? matches[this.highlight] : null;
     this.labels.forEach((label, position) => {
       const node = this.template.content.firstElementChild.cloneNode(true);
       const swatch = node.querySelector('[data-role="swatch"]');
       const name = node.querySelector('[data-role="name"]');
       const key = node.querySelector('[data-role="key"]');
       const retire = node.querySelector('[data-role="retire"]');
+      const eye = node.querySelector('[data-role="eye"]');
 
       swatch.style.background = label.colour;
       swatch.style.color = readableOn(label.colour);
@@ -103,10 +155,22 @@ export class LabelRail {
       key.textContent = position < 10 ? String(position === 9 ? 0 : position + 1) : "";
       node.dataset.idx = String(label.idx);
       if (this.current && this.current.idx === label.idx) node.dataset.current = "true";
+      if (this.filter && !matches.includes(label)) node.hidden = true;
+      if (highlighted === label) node.dataset.highlight = "true";
+      if (this.hidden.has(label.idx)) {
+        node.dataset.hidden = "true";
+        eye.title = `Show "${label.name}"`;
+      } else {
+        eye.title = `Hide "${label.name}" while you work`;
+      }
 
       node.addEventListener("click", (event) => {
-        if (event.target === retire) return;
+        if (event.target === retire || event.target === eye) return;
         this.pick(label);
+      });
+      eye.addEventListener("click", (event) => {
+        event.stopPropagation();
+        this.onToggleHidden(label.idx);
       });
       // Double-click a name to fix a typo. The index does not move, so every
       // file already exported keeps meaning what it meant.

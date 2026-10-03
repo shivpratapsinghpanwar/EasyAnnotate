@@ -669,3 +669,80 @@ def test_guides_show_over_empty_canvas_only(browser, service, bare_images):
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------------- M1: classes and visibility
+
+
+def test_typing_a_case_variant_picks_the_existing_class(browser, service, bare_images):
+    """How the door set got Close/close/Open/open. Typing 'open' while 'Open'
+    exists must reuse it, not make a second class."""
+    errors: list[str] = []
+    project = make_project(service, bare_images, "case")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Open")
+        page.keyboard.press("Escape")
+        drag(page, 560, 250, 700, 400)  # drawn as Open, then re-classed below
+        page.keyboard.press("/")
+        page.keyboard.type("open")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(900)
+        assert page.evaluate("window.__editor.rail.labels.map(l => l.name)") == ["Open"]
+
+        page.keyboard.press("/")
+        page.keyboard.type("Closed")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(900)
+        names = page.evaluate("window.__editor.rail.labels.map(l => l.name)")
+        assert names == ["Open", "Closed"]
+        # Made while a shape was selected, so the selection took the new class.
+        assert sorted(page.evaluate(
+            "[...window.__editor.scene.shapes.values()].map(s => s.label)"
+        )) == ["Closed", "Open"]
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_hidden_class_is_kept_by_accept_all(browser, service, bare_images):
+    """accept-all deletes what the confidence slider hides. A class hidden only
+    to declutter the view must not count as rejected."""
+    errors: list[str] = []
+    project = make_project(service, bare_images, "hide")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Open")
+        page.locator(".label-item [data-role='eye']").first.click()
+        page.wait_for_timeout(100)  # the list redraws on the next frame
+        assert page.evaluate("window.__editor.visible([...window.__editor.scene.shapes.values()][0])") is False
+        assert page.text_content("[data-role='shape-count']").strip() == "0 of 1 shown"
+
+        page.keyboard.press("a")
+        page.wait_for_timeout(900)
+        with httpx.Client(base_url=service, timeout=30) as client:
+            first = client.get(f"/api/projects/{project['id']}/images").json()["images"][0]
+            stored = client.get(f"/api/projects/{project['id']}/images/{first['id']}").json()
+        assert len(stored["shapes"]) == 1
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_the_shape_list_selects_what_is_clicked(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "list")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Open")
+        drag(page, 560, 250, 700, 400)
+        page.wait_for_timeout(900)
+        page.keyboard.press("Escape")
+        assert page.locator(".shape-item").count() == 2
+        page.locator(".shape-item").nth(0).click()
+        assert page.evaluate("[...window.__editor.scene.selection]") == [
+            page.evaluate("window.__editor.scene.order[0]")
+        ]
+    finally:
+        page.close()
+    assert not errors, errors

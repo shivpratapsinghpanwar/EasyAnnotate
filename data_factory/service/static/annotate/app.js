@@ -16,6 +16,7 @@ import { LabelRail } from "./labels.js";
 import { hitTest } from "./hit.js";
 import { draw } from "./render.js";
 import { Scene, attributesOf, cloneShape, draftId } from "./scene.js";
+import { ShapeList } from "./shapelist.js";
 import { AssistPanel } from "./assist.js";
 import {
   UndoStack,
@@ -73,8 +74,19 @@ class Editor {
     };
     this.tool = this.tools.select;
 
+    // Hiding is a way of looking, kept per project in this browser only: it
+    // changes nothing anyone else sees and nothing that is exported.
+    this.hiddenClasses = new Set(readPreference(`hidden:${this.projectId}`, []));
+    this.hideAll = false;
+
     this.rail = new LabelRail(document.getElementById("labels"), {
-      onPick: () => this.applyPendingGeometry(),
+      // Picking a class draws a held shape if there is one, and otherwise
+      // re-classes the selection -- the same as its number key.
+      onPick: (label) => {
+        if (this.pendingGeometry) this.applyPendingGeometry();
+        else this.assignClassToSelection(label);
+      },
+      onToggleHidden: (idx) => this.toggleClassHidden(idx),
       onCreate: (name) => this.createLabel(name),
       onRename: (idx, name) => this.renameLabel(idx, name),
       onRetire: (idx, name) => this.retireLabel(idx, name),
@@ -87,6 +99,23 @@ class Editor {
       },
     });
     this.armedTool = null;
+
+    this.shapeList = new ShapeList(document.getElementById("shapes"), {
+      onSelect: (id, additive) => {
+        const shape = this.scene.get(id);
+        if (shape && !this.visible(shape)) {
+          this.say("that shape is hidden — show its class to edit it");
+          return;
+        }
+        this.scene.select(id, { additive });
+        this.onSelectionChanged();
+      },
+      onHover: (id) => {
+        this.scene.hover = id;
+        this.scene.invalidate();
+      },
+      colourFor: (shape) => this.rail.colourFor(shape),
+    });
 
     this.strip = new Filmstrip(document.getElementById("filmstrip"), {
       onOpen: (id) => this.openImage(id),
@@ -115,6 +144,7 @@ class Editor {
     document.getElementById("project-name").textContent = this.project.name;
 
     this.rail.setLabels(this.project.labels || []);
+    this.rail.setHidden(this.hiddenClasses);
     await this.loadImageList();
 
     this.updateReviewPanel(this.project.agreement);
@@ -608,6 +638,11 @@ class Editor {
         crosshair: this.wantsCrosshair() ? this.pointer : null,
       });
     }
+    this.shapeList.update(
+      this.scene,
+      (shape) => this.visible(shape),
+      `${this.hideAll}:${[...this.hiddenClasses].join(",")}:${this.minConfidence}`
+    );
     requestAnimationFrame(() => this.frame());
   }
 
@@ -859,6 +894,17 @@ class Editor {
         case "s":
           this.markState("skipped");
           break;
+        case "h":
+          // See the bare image -- the fastest check of whether a box is tight.
+          this.hideAll = !this.hideAll;
+          this.dropHiddenFromSelection();
+          this.scene.invalidate();
+          this.say(this.hideAll ? "shapes hidden — H to show them" : "shapes shown");
+          break;
+        case "/":
+          event.preventDefault();
+          this.rail.focusInput();
+          break;
         default:
           break;
       }
@@ -939,9 +985,35 @@ class Editor {
   // A shape hidden by the confidence slider is not deleted, only unseen: the
   // filter is a way of looking, not an edit. Accepting an image is what turns
   // what you can see into what you keep.
-  visible(shape) {
+  passesConfidence(shape) {
     if (shape.confidence == null) return true;
     return shape.confidence >= this.minConfidence;
+  }
+
+  // What is drawn and what can be grabbed. Three different reasons to hide,
+  // and only the confidence slider is a judgement on the shape -- see
+  // acceptAll, which must never treat a hidden *class* as rejected.
+  visible(shape) {
+    if (!shape || this.hideAll) return false;
+    if (this.hiddenClasses.has(shape.labelIdx)) return false;
+    return this.passesConfidence(shape);
+  }
+
+  toggleClassHidden(idx) {
+    if (this.hiddenClasses.has(idx)) this.hiddenClasses.delete(idx);
+    else this.hiddenClasses.add(idx);
+    writePreference(`hidden:${this.projectId}`, [...this.hiddenClasses]);
+    this.rail.setHidden(this.hiddenClasses);
+    this.dropHiddenFromSelection();
+    this.scene.invalidate();
+  }
+
+  // Never leave something selected that cannot be seen: Delete would remove
+  // it, and arrows would move it, with no feedback at all.
+  dropHiddenFromSelection() {
+    for (const id of [...this.scene.selection]) {
+      if (!this.visible(this.scene.get(id))) this.scene.selection.delete(id);
+    }
   }
 
   hasPredictions() {
@@ -972,7 +1044,9 @@ class Editor {
     // Anything the slider is hiding is a rejection, so it has to be removed
     // before the accept -- otherwise "accept what I can see" silently keeps
     // what you could not.
-    const hidden = [...this.scene.shapes.values()].filter((s) => !this.visible(s));
+    // Only the confidence slider rejects. A class hidden to declutter the
+    // view is still wanted, and deleting it here would be silent data loss.
+    const hidden = [...this.scene.shapes.values()].filter((s) => !this.passesConfidence(s));
     if (hidden.length) {
       for (const shape of hidden) this.undo.run(removeShape(this.scene, shape.id));
       await this.flushSave();
@@ -1183,6 +1257,25 @@ function looksLikeTrackpad(event, dx, dy) {
   if (event.deltaMode !== 0) return false;
   if (dx !== 0) return true;
   return Math.abs(dy) < 40 && !Number.isInteger(dy);
+}
+
+// Per-browser conveniences. Storage can be missing or refuse (private
+// windows, blocked site data); the editor must work identically without it.
+function readPreference(key, fallback) {
+  try {
+    const raw = localStorage.getItem(`easyannotate:${key}`);
+    return raw == null ? fallback : JSON.parse(raw);
+  } catch {
+    return fallback;
+  }
+}
+
+function writePreference(key, value) {
+  try {
+    localStorage.setItem(`easyannotate:${key}`, JSON.stringify(value));
+  } catch {
+    // Not persisted; still applied for this session.
+  }
 }
 
 function isTypingTarget(node) {
