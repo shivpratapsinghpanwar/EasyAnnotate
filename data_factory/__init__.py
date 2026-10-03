@@ -28,10 +28,14 @@ def _detect_version() -> str:
     """
     from importlib.metadata import PackageNotFoundError, version
 
-    try:
-        return version("data-factory")
-    except PackageNotFoundError:
-        return "0.0.0+source"
+    # Published as "easyannotate"; "data-factory" is the name it had before,
+    # and an editable install made then still answers to it.
+    for distribution in ("easyannotate", "data-factory"):
+        try:
+            return version(distribution)
+        except PackageNotFoundError:
+            continue
+    return "0.0.0+source"
 
 
 __version__ = _detect_version()

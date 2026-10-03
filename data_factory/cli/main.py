@@ -24,19 +24,22 @@ from ..core.registry import Operation, ParamError
 from ..core.types import Cancelled, Context
 from . import render
 
-PROGRAM = "datafactory"
+PROGRAM = "easyannotate"
 
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog=PROGRAM,
         description=(
-            "Data Factory -- one tool for computer-vision dataset preparation. "
-            f"Run '{PROGRAM}' with no arguments for an interactive menu."
+            "EasyAnnotate -- annotate images with nothing to set up first, review a "
+            "model's predictions fast, and get a dataset out that is correct. "
+            f"Try '{PROGRAM} demo'. Run '{PROGRAM}' with no arguments for a menu."
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=(
             "examples:\n"
+            f"  {PROGRAM} demo\n"
+            f"  {PROGRAM} annotate ./my-images\n"
             f"  {PROGRAM} inspect.dataset --folder ./data\n"
             f"  {PROGRAM} clean.dedup --folders ./a ./b --method phash --dry-run\n"
             f"  {PROGRAM} export.coco --folder ./voc --output ./coco\n"
@@ -105,6 +108,17 @@ def build_parser() -> argparse.ArgumentParser:
         help="ignore label files already in the folder instead of loading them",
     )
     annotate.set_defaults(_handler=_cmd_annotate)
+
+    demo = subparsers.add_parser(
+        "demo",
+        help="open a ready-made sample project: some labelled, some predicted, some to do",
+    )
+    demo.add_argument("--folder", help="where to build it; defaults beside the database")
+    demo.add_argument("--port", type=int, default=8765, help="port to listen on")
+    demo.add_argument("--host", default="127.0.0.1", help="bind address")
+    demo.add_argument("--workspace", help="where the annotation database lives")
+    demo.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    demo.set_defaults(_handler=_cmd_demo)
 
     for operation in registry.all_operations():
         _add_operation_parser(subparsers, operation)
@@ -224,14 +238,13 @@ def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         import uvicorn
     except ImportError:
         err.write(
-            "the web interface needs the 'web' extra:\n"
-            "    pip install \"data-factory[web]\"\n"
-            "    uv tool install \"data-factory[web]\"\n"
+            "the web interface could not import uvicorn -- reinstall:\n"
+            "    pip install --force-reinstall easyannotate\n"
         )
         return 2
 
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
-    out.write(f"Data Factory is at {url}\n")
+    out.write(f"EasyAnnotate is at {url}\n")
     if args.host == "0.0.0.0" and not args.api_key:
         err.write(
             "warning: binding to 0.0.0.0 exposes this to your whole network with no "
@@ -271,15 +284,6 @@ def _cmd_annotate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 
     if args.workspace:
         os.environ["DATAFACTORY_WORKSPACE"] = str(Path(args.workspace).expanduser())
-
-    try:
-        import uvicorn  # noqa: F401
-    except ImportError:
-        err.write(
-            "the editor needs the 'web' extra:\n"
-            '    pip install "data-factory[web]"\n'
-        )
-        return 2
 
     from ..annotate import attach
     from ..annotate.store import StoreError
@@ -321,8 +325,13 @@ def _cmd_annotate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     for warning in summary["warnings"]:
         out.write(f"  note       {warning}\n")
 
+    return _serve_editor(project.id, args, out)
+
+
+def _serve_editor(project_id: str, args: argparse.Namespace, out: TextIO) -> int:
+    """Start the server and open the editor on one project."""
     host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
-    url = f"http://{host}:{args.port}/annotate?project={project.id}"
+    url = f"http://{host}:{args.port}/annotate?project={project_id}"
     out.write(f"\n{url}\n")
     out.write("Press Ctrl+C to stop.\n")
     out.flush()
@@ -342,6 +351,43 @@ def _cmd_annotate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         log_level="warning",
     )
     return 0
+
+
+def _cmd_demo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    """Build (once) and open the sample project.
+
+    The first minute with a tool decides whether there is a second. This is
+    one command from install to an editor with labelled images, predictions
+    to review, and images still to do.
+    """
+    import os
+    import tempfile
+
+    if args.workspace:
+        os.environ["DATAFACTORY_WORKSPACE"] = str(Path(args.workspace).expanduser())
+
+    from ..annotate import attach, demo, review
+    from ..service.deps import data_root, get_store
+
+    folder = Path(args.folder).expanduser() if args.folder else data_root() / "demo"
+    built = demo.build(folder)
+    store = get_store()
+    summary = attach.open_folder(store, folder, name="EasyAnnotate demo")
+    project = summary["project"]
+
+    if built["fresh"]:
+        with tempfile.TemporaryDirectory() as holding:
+            run = demo.write_predictions(built["predictions"], Path(holding) / "run")
+            report = review.import_predictions(store, project, run, name="demo model")
+        out.write(
+            f"\nEasyAnnotate demo -- {summary['images']} images in {folder}\n"
+            f"  {summary['shapes_imported']} shapes labelled by hand\n"
+            f"  {report['shapes_imported']} model predictions to review: "
+            f"A accepts an image, the slider hides weak guesses\n"
+        )
+    else:
+        out.write(f"\nEasyAnnotate demo -- reopening {folder}\n")
+    return _serve_editor(project.id, args, out)
 
 
 def _cmd_run_operation(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
