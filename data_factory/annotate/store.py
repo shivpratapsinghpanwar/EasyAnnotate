@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a rung is added to ``MIGRATIONS``.
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 #: The version-1 DDL lives beside this module rather than in a string, so it can
 #: be read, diffed and run through a SQLite client directly.
@@ -213,8 +213,18 @@ def _to_v3(conn: sqlite3.Connection, target: int) -> None:
     _step(conn, target, "ALTER TABLE image ADD COLUMN predicted_count INTEGER NOT NULL DEFAULT 0")
 
 
+def _to_v4(conn: sqlite3.Connection, target: int) -> None:
+    """What a shape's geometry means: box, polygon, line, point or obb.
+
+    Empty means the historical rule -- a polygon if there is an outline of
+    three or more points, else a box -- so every existing row keeps meaning
+    exactly what it meant.
+    """
+    _step(conn, target, "ALTER TABLE shape ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
+
+
 #: Rung *n* migrates a database at version *n* to version *n+1*.
-MIGRATIONS = [_to_v1, _to_v2, _to_v3]
+MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4]
 
 
 def open_store(root: Path | str) -> Store:

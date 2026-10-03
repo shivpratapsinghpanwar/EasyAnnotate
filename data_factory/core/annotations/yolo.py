@@ -159,6 +159,10 @@ def _polygon_shape(
         bbox=(min(xs), min(ys), max(xs), max(ys)),
         polygon=polygon,
         confidence=confidence,
+        # Eight values is YOLO-OBB's line, a rotated box by its corners. A
+        # genuine four-vertex segmentation reads the same way, and treating
+        # it as a rotated box costs nothing: it is one.
+        kind="obb" if len(polygon) == 4 else "",
     )
 
 

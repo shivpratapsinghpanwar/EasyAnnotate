@@ -32,14 +32,16 @@ the first box. Removing that is the entire product argument.
 
 ## State
 
-**Phases 0–4 of `docs/PLAN.md` are done, and M0 ("trust") of
-`docs/ROADMAP.md`, and M1 (editor essentials).** 649 tests pass, including 24 browser tests (install
-playwright to run them). **The roadmap is the plan of record now** — a scored
+**Phases 0–4 of `docs/PLAN.md` are done; of `docs/ROADMAP.md`, M0 (trust),
+M1 (editor essentials), M2 (shipping: `easyannotate` on the command line, CI,
+demo, wheel and binary both run) and the rotated-box/line/point half of M5.**
+665 tests pass, including 27 browser tests (install playwright to run them). **The roadmap is the plan of record now** — a scored
 path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
 
 Commits carry the owner's name only: never a Claude co-author line.
 
-Working today: format conversion between 5 formats; cleaning; annotation-aware
+Working today: format conversion between 6 formats (VOC, YOLO incl. OBB, COCO,
+LabelMe, CSV, DOTA); five shape kinds (box, polygon, rotated box, line, point); cleaning; annotation-aware
 geometry; analysis; a sandboxed HTTP service; the **annotation editor** (boxes,
 polygons, undo, autosave, resume); **attached projects** (`datafactory annotate
 <folder>` edits a folder's own label files in place); the **model loop** (import
@@ -54,10 +56,11 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **PyInstaller binary** (`packaging/`) and **PyPI publish** — written, never
-  run. The Dockerfile was in this category too and turned out to be broken
-  (a shell character-class bug in `*.whl[web]`). Expect the same here: **test
-  these by running them, not by reading them.**
+- **PyPI publish** and **making the repo public** — the owner's calls, not
+  yet made. The wheel (`uv build`) installs into a clean venv and runs; the
+  PyInstaller binary (`pyinstaller packaging/easyannotate.spec`) boots and
+  serves the editor. Docker is CI-tested but has not run on this machine.
+  Rule unchanged: **test these by running them, not by reading them.**
 - **Phase 5 (hosted)** — accounts, quotas, per-tenant isolation. Not started.
   `owner_id` scoping already exists throughout, so it is additive.
 - **`detect.infer`** — training/inference still happens outside the tool. This
@@ -90,7 +93,7 @@ index, retiring keeps the slot, new classes append. It used to be
 easyannotate demo                 # sample project in the browser
 easyannotate serve                # http://localhost:8765
 easyannotate annotate <folder>    # edit a folder's labels in place
-python -m pytest                  # 649; 24 browser tests skip without playwright
+python -m pytest                  # 665; 27 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3

@@ -27,7 +27,6 @@ from pydantic import BaseModel, Field
 from ...annotate import images as images_mod
 from ...annotate import labels as labels_mod
 from ...annotate import projects as projects_mod
-from ...annotate import shapes as shapes_mod
 from ...annotate.store import Store, StoreError
 from ...annotate.tools import postprocess
 from ...annotate.tools.protocol import ToolError, ToolNotReady, ToolUnavailable

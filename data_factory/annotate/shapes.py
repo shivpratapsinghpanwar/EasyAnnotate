@@ -97,6 +97,7 @@ def _stored(row: Any, names: dict[int, str]) -> StoredShape:
             difficult=int(row["difficult"]),
             occluded=int(row["occluded"]),
             confidence=row["confidence"],
+            kind=str(row["kind"] or "") if "kind" in row.keys() else "",
         ),
         label_idx=idx,
         origin=row["origin"],
@@ -226,7 +227,7 @@ def save(
         existing = {s.id: s for s in listing(store, project, image)}
         result = SaveResult(version=image.version, labels_created=created)
 
-        for shape_id, raw in incoming:
+        for position, (shape_id, raw) in enumerate(incoming):
             # Server-side clamping, always. A browser can send a box dragged
             # off the edge of the image, and every format writer downstream
             # assumes coordinates are inside the picture.
@@ -258,11 +259,11 @@ def save(
                 conn.execute(
                     "UPDATE shape SET label_idx = ?, xmin = ?, ymin = ?, xmax = ?,"
                     " ymax = ?, polygon = ?, pose = ?, truncated = ?, difficult = ?,"
-                    " occluded = ?, confidence = ?, edited_at = ? WHERE id = ?",
+                    " occluded = ?, confidence = ?, edited_at = ?, kind = ? WHERE id = ?",
                     (
                         label_idx, xmin, ymin, xmax, ymax, polygon, shape.pose,
                         shape.truncated, shape.difficult, shape.occluded,
-                        shape.confidence, edited, prior.id,
+                        shape.confidence, edited, shape.shape_kind, prior.id,
                     ),
                 )
                 result.updated += 1
@@ -272,12 +273,18 @@ def save(
                 conn.execute(
                     "INSERT INTO shape (id, image_id, project_id, label_idx, xmin,"
                     " ymin, xmax, ymax, polygon, origin, confidence, pose, truncated,"
-                    " difficult, occluded, created_at)"
-                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    " difficult, occluded, created_at, kind)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         fresh, image.id, project.id, label_idx, xmin, ymin, xmax,
                         ymax, polygon, origin, shape.confidence, shape.pose,
-                        shape.truncated, shape.difficult, shape.occluded, now,
+                        shape.truncated, shape.difficult, shape.occluded,
+                        # Distinct per shape, in submission order. Listing
+                        # sorts by created_at, and shapes saved in one burst
+                        # would otherwise come back in random id order --
+                        # reshuffling what is on top of what after a reload.
+                        now + position * 1e-6,
+                        shape.shape_kind,
                     ),
                 )
                 result.inserted += 1

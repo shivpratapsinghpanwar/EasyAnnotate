@@ -77,6 +77,7 @@ export class Scene {
         origin: raw.origin || "human",
         confidence: raw.confidence,
         edited: !!raw.edited,
+        kind: kindOf(raw),
         // Carried through untouched so a save cannot reset them. VOC's
         // difficult flag changes how a detector is scored; losing it to an
         // unrelated box nudge is damage nobody sees until evaluation.
@@ -204,6 +205,7 @@ export class Scene {
         label: shape.label,
         bbox: shape.bbox,
         polygon: shape.polygon,
+        kind: kindOf(shape),
         confidence: shape.confidence ?? null,
         // Always complete. The server reads a missing attribute as "keep
         // what you have", so omitting one here could never turn a flag off.
@@ -236,6 +238,33 @@ export function attributesOf(raw) {
   const out = {};
   for (const key of ATTRIBUTE_KEYS) if (raw[key] !== undefined) out[key] = raw[key];
   return out;
+}
+
+// What the geometry means. Rows written before kinds existed have none and
+// follow the old rule: an outline of three or more points is a polygon.
+export function kindOf(shape) {
+  if (shape.kind) return shape.kind;
+  return shape.polygon && shape.polygon.length >= 3 ? "polygon" : "box";
+}
+
+export function centroid(points) {
+  let x = 0;
+  let y = 0;
+  for (const [px, py] of points) {
+    x += px;
+    y += py;
+  }
+  return [x / points.length, y / points.length];
+}
+
+export function rotatePoints(points, cx, cy, radians) {
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  return points.map(([x, y]) => {
+    const dx = x - cx;
+    const dy = y - cy;
+    return [cx + dx * cos - dy * sin, cy + dx * sin + dy * cos];
+  });
 }
 
 export function cloneShape(shape) {

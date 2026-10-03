@@ -892,3 +892,88 @@ def test_a_box_can_be_drawn_inside_another(browser, service, bare_images):
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------------- M5: points, lines, rotated
+
+
+def _kinds(page):
+    return page.evaluate(
+        "window.__editor.scene.order.map(id => { const s = window.__editor.scene.get(id);"
+        " return [s.kind, s.bbox, s.polygon]; })"
+    )
+
+
+def test_a_point_is_one_click(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "point")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Door")
+        page.keyboard.press("k")
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.click(rect["x"] + 700, rect["y"] + 150)
+        page.wait_for_timeout(900)
+        kinds = _kinds(page)
+        assert kinds[1][0] == "point"
+        assert kinds[1][1][0] == kinds[1][1][2] and kinds[1][1][1] == kinds[1][1][3]
+        image_id = page.evaluate("window.__editor.scene.imageId")
+        stored = _stored_shapes(service, project["id"], image_id)
+        assert stored[1]["kind"] == "point"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_line_is_clicks_then_enter(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "line")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Seam")
+        page.keyboard.press("l")
+        rect = page.locator("#canvas").bounding_box()
+        for x, y in ((600, 100), (700, 180), (800, 120)):
+            page.mouse.click(rect["x"] + x, rect["y"] + y)
+            page.wait_for_timeout(80)
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(900)
+        kinds = _kinds(page)
+        assert kinds[1][0] == "line" and len(kinds[1][2]) == 3
+        image_id = page.evaluate("window.__editor.scene.imageId")
+        assert _stored_shapes(service, project["id"], image_id)[1]["kind"] == "line"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_rotated_box_turns_and_stays_a_rectangle(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "obb")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Van")
+        page.keyboard.press("o")
+        drag(page, 600, 150, 800, 300)
+        page.wait_for_timeout(300)
+        before = _kinds(page)[1]
+        assert before[0] == "obb" and len(before[2]) == 4
+
+        page.keyboard.press("Shift+]")
+        page.wait_for_timeout(900)
+        after = _kinds(page)[1]
+        assert after[2] != before[2] and len(after[2]) == 4
+        # Still a rectangle: opposite sides equal in length.
+        (ax, ay), (bx, by), (cx, cy), (dx, dy) = after[2]
+        side = lambda p, q: ((p[0] - q[0]) ** 2 + (p[1] - q[1]) ** 2) ** 0.5
+        assert abs(side((ax, ay), (bx, by)) - side((cx, cy), (dx, dy))) < 2.5
+        assert abs(side((bx, by), (cx, cy)) - side((dx, dy), (ax, ay))) < 2.5
+
+        page.reload(wait_until="networkidle")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        page.wait_for_timeout(500)
+        stored = _kinds(page)[1]
+        assert stored[0] == "obb" and stored[2] == after[2]
+    finally:
+        page.close()
+    assert not errors, errors

@@ -8,7 +8,7 @@
 // per mouse move.
 
 import { hitTest } from "../hit.js";
-import { rebuildBox } from "../scene.js";
+import { centroid, rebuildBox, rotatePoints } from "../scene.js";
 import { changeGeometry, snapshot } from "../undo.js";
 
 export const name = "select";
@@ -39,6 +39,20 @@ export function create(editor) {
 
       const shape = scene.get(hit.id);
 
+      if (hit.part === "rotate" && shape.polygon) {
+        const [cx, cy] = centroid(shape.polygon);
+        drag = {
+          id: shape.id,
+          part: "rotate",
+          ix,
+          iy,
+          before: snapshot(shape),
+          centre: [cx, cy],
+          startAngle: Math.atan2(iy - cy, ix - cx),
+        };
+        return;
+      }
+
       if (hit.part.startsWith("edge-") && shape.polygon) {
         // Alt on an edge midpoint inserts a vertex there. Without a modifier
         // the edge just moves the shape, so a stray click near an edge does
@@ -63,14 +77,20 @@ export function create(editor) {
         // Alt-click deletes a vertex -- but never below a triangle, which
         // would leave an outline that cannot enclose anything.
         const index = Number(hit.part.slice(7));
-        if (shape.polygon.length > 3) {
+        // A line needs two points; a polygon three; a rotated box keeps four.
+        const minimum = shape.kind === "line" ? 2 : 3;
+        if (shape.kind !== "obb" && shape.polygon.length > minimum) {
           const before = snapshot(shape);
           shape.polygon.splice(index, 1);
           rebuildBox(shape);
           scene.touch();
           editor.undo.push(changeGeometry(scene, shape.id, before, snapshot(shape)));
         } else {
-          editor.say("a polygon needs at least three points");
+          editor.say(
+            shape.kind === "obb"
+              ? "a rotated box always has four corners"
+              : `a ${shape.kind === "line" ? "line needs at least two" : "polygon needs at least three"} points`
+          );
         }
         return;
       }
@@ -107,10 +127,19 @@ export function create(editor) {
       if (drag.part === "body") {
         shape.bbox = shape.bbox.map((v, i) => v + (i % 2 === 0 ? dx : dy));
         if (shape.polygon) shape.polygon = shape.polygon.map(([x, y]) => [x + dx, y + dy]);
+      } else if (drag.part === "rotate") {
+        // Rotation is applied to the shape as it was when the drag began, so
+        // a long drag does not accumulate rounding from every mouse move.
+        const [cx, cy] = drag.centre;
+        const angle = Math.atan2(iy - cy, ix - cx) - drag.startAngle;
+        shape.polygon = rotatePoints(drag.before.polygon, cx, cy, angle);
+        rebuildBox(shape);
       } else if (drag.part.startsWith("handle-")) {
         resize(shape, Number(drag.part.slice(7)), dx, dy);
       } else if (drag.part.startsWith("vertex-") && shape.polygon) {
-        shape.polygon[Number(drag.part.slice(7))] = [ix, iy];
+        const index = Number(drag.part.slice(7));
+        if (shape.kind === "obb") moveCorner(shape, index, ix, iy);
+        else shape.polygon[index] = [ix, iy];
         rebuildBox(shape);
       }
 
@@ -145,6 +174,29 @@ export function create(editor) {
       return null;
     },
   };
+}
+
+// Dragging one corner of a rotated box keeps it a rectangle: the opposite
+// corner stays put and the two neighbours slide along their edges. Without
+// this a corner drag would turn the box into an arbitrary quadrilateral, and
+// every OBB format would then be lying about what it holds.
+function moveCorner(shape, index, ix, iy) {
+  const p = shape.polygon;
+  const [ox, oy] = p[(index + 2) % 4];
+  const u = unitVector(p[(index + 1) % 4], [ox, oy]);
+  const v = unitVector(p[(index + 3) % 4], [ox, oy]);
+  const a = (ix - ox) * u[0] + (iy - oy) * u[1];
+  const b = (ix - ox) * v[0] + (iy - oy) * v[1];
+  p[(index + 1) % 4] = [ox + a * u[0], oy + a * u[1]];
+  p[(index + 3) % 4] = [ox + b * v[0], oy + b * v[1]];
+  p[index] = [ox + a * u[0] + b * v[0], oy + a * u[1] + b * v[1]];
+}
+
+function unitVector([x, y], [fromX, fromY]) {
+  const dx = x - fromX;
+  const dy = y - fromY;
+  const len = Math.hypot(dx, dy) || 1;
+  return [dx / len, dy / len];
 }
 
 // Handle order matches `handlesOf`: four corners, then four edge midpoints.

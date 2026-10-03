@@ -21,7 +21,7 @@ from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 #: Shape types we can faithfully represent as a bbox and optional polygon.
-SUPPORTED_SHAPES = ("polygon", "rectangle", "linestrip", "line", "point")
+SUPPORTED_SHAPES = ("polygon", "rectangle", "linestrip", "line", "point", "rotation")
 
 
 def read(
@@ -92,30 +92,47 @@ def _read_shape(raw: dict[str, Any], path: Path, skipped: list[str]) -> Shape | 
     ys = [p[1] for p in points]
     bbox = (min(xs), min(ys), max(xs), max(ys))
 
-    # A rectangle is stored as its two opposite corners, so it has no outline;
-    # a point has no area at all and only survives as a degenerate box.
-    polygon = points if kind in ("polygon", "linestrip", "line") and len(points) >= 3 else None
-    return Shape(label=label, bbox=bbox, polygon=polygon)
+    # Boxes and polygons keep an empty kind: the historical rule infers them,
+    # and stamping them would make every old equality test lie about change.
+    if kind == "polygon" and len(points) >= 3:
+        return Shape(label=label, bbox=bbox, polygon=points)
+    if kind == "rotation" and len(points) == 4:
+        # LabelMe 5's rotated box: four corners, in order.
+        return Shape(label=label, bbox=bbox, polygon=points, kind="obb")
+    if kind in ("linestrip", "line") and len(points) >= 2:
+        return Shape(label=label, bbox=bbox, polygon=points, kind="line")
+    if kind == "point":
+        x, y = points[0]
+        return Shape(label=label, bbox=(x, y, x, y), kind="point")
+    # A rectangle is stored as its two opposite corners, so it has no outline.
+    return Shape(label=label, bbox=bbox)
 
 
 def write(annotation: Annotation, path: Path, *, image_path: str | None = None) -> Path:
     """Serialise to LabelMe JSON."""
     shapes: list[dict[str, Any]] = []
     for shape in annotation.shapes:
-        if shape.has_polygon:
+        if shape.is_point:
+            x, y = shape.bbox[:2]
+            points = [[int(x), int(y)]]
+            shape_type = "point"
+        elif shape.is_line and shape.polygon:
+            points = [[int(x), int(y)] for x, y in shape.polygon]
+            shape_type = "linestrip"
+        elif shape.has_polygon:
             assert shape.polygon is not None
             points = [[int(x), int(y)] for x, y in shape.polygon]
-            kind = "polygon"
+            shape_type = "rotation" if shape.shape_kind == "obb" and len(points) == 4 else "polygon"
         else:
             xmin, ymin, xmax, ymax = shape.bbox
             points = [[int(xmin), int(ymin)], [int(xmax), int(ymax)]]
-            kind = "rectangle"
+            shape_type = "rectangle"
         shapes.append(
             {
                 "label": shape.label,
                 "points": points,
                 "group_id": None,
-                "shape_type": kind,
+                "shape_type": shape_type,
                 "flags": {},
             }
         )

@@ -27,9 +27,10 @@ from ..pairs import PairIndex
 from ..types import Action, Context
 from . import coco as coco_fmt
 from . import csvfmt, labelme, voc, yolo
+from . import dota
 from .model import Annotation, AnnotationError
 
-FORMATS = ("voc", "yolo", "coco", "labelme", "csv")
+FORMATS = ("voc", "yolo", "coco", "labelme", "csv", "dota")
 
 #: Formats able to carry a polygon outline. Converting out of one of these into
 #: a box-only format is lossy, and the converter says so rather than quietly
@@ -91,8 +92,11 @@ def detect(folder: Path) -> str:
     tell LabelMe from COCO.
     """
     folder = Path(folder)
-    if yolo.find_data_yaml(folder) or (folder / yolo.LABEL_DIR).is_dir():
+    if yolo.find_data_yaml(folder):
         return "yolo"
+    if (folder / yolo.LABEL_DIR).is_dir():
+        # DOTA uses the same images/ + labels/ layout; only the lines differ.
+        return "dota" if _looks_like_dota(folder) else "yolo"
 
     for path in coco_fmt.find_annotation_files(folder):
         if _looks_like_coco(path):
@@ -111,11 +115,35 @@ def detect(folder: Path) -> str:
     if counts["csv"]:
         return "csv"
     if counts["yolo"]:
-        return "yolo"
+        # Both are bare .txt files; DOTA names its class in the ninth field,
+        # where YOLO has nothing but numbers.
+        return "dota" if _looks_like_dota(folder) else "yolo"
     raise AnnotationError(
         f"cannot tell what format {folder} is -- found no .xml, .txt, .json or "
         f".csv labels. Pass the format explicitly."
     )
+
+
+def _looks_like_dota(folder: Path) -> bool:
+    for path in folder.rglob("*.txt"):
+        if not path.is_file() or path.name == "classes.txt":
+            continue
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            parts = line.split()
+            if not parts or line.startswith(dota.HEADER_PREFIXES):
+                continue
+            if len(parts) < 9:
+                return False
+            try:
+                float(parts[8])
+            except ValueError:
+                return True
+            return False
+    return False
 
 
 def _count(folder: Path, suffix: str, limit: int = 1) -> int:
@@ -159,6 +187,7 @@ def read_dataset(
         "coco": _read_coco,
         "labelme": _read_labelme,
         "csv": _read_csv,
+        "dota": _read_dota,
     }[resolved]
     dataset = reader(folder, recursive, ctx or Context())
     dataset.source_format = resolved
@@ -268,6 +297,48 @@ def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         )
     if not dataset.classes:
         dataset.classes = list(classes.names)
+    return dataset
+
+
+def _read_dota(folder: Path, recursive: bool, ctx: Context) -> Dataset:
+    """Like YOLO -- one .txt beside or under labels/ per image -- but the class
+    is named in the file, so there is no list to find."""
+    dataset = Dataset()
+    images = list(fs.iter_images(folder, recursive=recursive))
+    sizes = dict(
+        parallel.collect(
+            images,
+            _image_size,
+            ctx=ctx,
+            label=lambda image: image.name,
+            on_error=lambda image, exc: dataset.warnings.append(
+                f"{image.name}: cannot read image size ({exc})"
+            ),
+        )
+    )
+    for image in images:
+        label_path = yolo.label_path_for(image, folder)
+        width, height = sizes.get(image, (0, 0))
+        if width <= 0:
+            continue
+        if not label_path.is_file():
+            dataset.items.append(
+                Item(annotation=Annotation(filename=image.name, width=width, height=height),
+                     image=image)
+            )
+            continue
+        try:
+            annotation = dota.read(label_path, width, height, filename=image.name)
+        except AnnotationError as exc:
+            dataset.warnings.append(str(exc))
+            continue
+        dataset.items.append(
+            Item(
+                annotation=annotation,
+                image=image,
+                split=_split_of(str(fs.relative_to_safe(image, folder)).replace("\\", "/")),
+            )
+        )
     return dataset
 
 
@@ -417,6 +488,7 @@ def write_dataset(
         "coco": _write_coco,
         "labelme": _write_labelme,
         "csv": _write_csv,
+        "dota": _write_dota,
     }[fmt]
     writer(dataset, output, ctx, report, copy_images, segmentation, on_action)
     return report
@@ -487,6 +559,22 @@ def _write_yolo(dataset, output, ctx, report, copy_images, segmentation, on_acti
     report["classes"] = list(classes.names)
 
 
+def _write_dota(dataset, output, ctx, report, copy_images, segmentation, on_action) -> None:
+    for item in dataset.items:
+        split = item.split or "train"
+        image_dir = output / yolo.IMAGE_DIR / split
+        label_dir = output / yolo.LABEL_DIR / split
+        fs.ensure_dir(image_dir, ctx)
+        fs.ensure_dir(label_dir, ctx)
+        stem = item.stem
+        if copy_images and item.image is not None:
+            _copy_image(item, image_dir / f"{stem}{item.image.suffix}", ctx, report, on_action)
+        if not ctx.dry_run:
+            dota.write(item.annotation, label_dir / f"{stem}.txt")
+        report["written"] = int(report["written"]) + 1
+    report["classes"] = list(dataset.labels)
+
+
 def _write_coco(dataset, output, ctx, report, copy_images, segmentation, on_action) -> None:
     by_split: dict[str, list[Item]] = {}
     for item in dataset.items:
@@ -531,7 +619,7 @@ def _write_csv(dataset, output, ctx, report, copy_images, segmentation, on_actio
 
 def label_extension(fmt: str) -> str:
     """The sidecar extension a format uses, or empty for the collected ones."""
-    return {"voc": ".xml", "labelme": ".json", "yolo": ".txt"}.get(fmt, "")
+    return {"voc": ".xml", "labelme": ".json", "yolo": ".txt", "dota": ".txt"}.get(fmt, "")
 
 
 def iter_formats() -> Iterable[str]:

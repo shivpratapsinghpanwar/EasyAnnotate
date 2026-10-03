@@ -42,6 +42,10 @@ What you get instead:
 - **Exports are correct.** YOLO class indices never move when you rename or
   retire a class. Export defaults to reviewed images only, so unreviewed model
   output can never silently become training data.
+- **Five shape kinds, every format.** Boxes, polygons, rotated boxes, lines
+  and points. Rotated boxes export as YOLO-OBB and DOTA, points as COCO
+  keypoints, everything to LabelMe — and a dataset of any of them still comes
+  out as plain boxes when a detector wants boxes.
 - **Dataset tooling built in.** 28 operations — convert between five formats,
   find duplicates and train/val leakage, health reports, augmentation that
   moves the labels with the pixels — one `pip install` away.
@@ -164,6 +168,8 @@ drag              draw a box in the current class -- inside other boxes too
 click             select a shape; drag it to move, its handles to resize
 /                 find a class by typing (never makes a Close/close variant)
 P                 polygon: click points, Enter or double-click to close
+O                 rotated box: drag, then turn it by its handle, or [ and ]
+L  K              line: click points, Enter  ·  point: one click
 1–0               pick a class — or re-class what is selected
 Alt+click         on a vertex: delete it. On an edge midpoint: insert one
 Ctrl+D            copy the previous image's shapes (worth more than a model on video)

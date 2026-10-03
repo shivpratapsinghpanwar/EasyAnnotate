@@ -15,7 +15,7 @@ import { Filmstrip } from "./filmstrip.js";
 import { LabelRail } from "./labels.js";
 import { hitTest } from "./hit.js";
 import { draw } from "./render.js";
-import { Scene, attributesOf, cloneShape, draftId } from "./scene.js";
+import { Scene, attributesOf, centroid, cloneShape, draftId, rebuildBox, rotatePoints } from "./scene.js";
 import { ShapeList } from "./shapelist.js";
 import { AssistPanel } from "./assist.js";
 import {
@@ -23,6 +23,7 @@ import {
   addMany,
   addShape,
   changeAttributes,
+  changeGeometry,
   changeLabel,
   changeMany,
   removeShape,
@@ -33,6 +34,9 @@ import { Viewport, decodePixels, releaseMips } from "./viewport.js";
 // model-backed helpers -- two different things that were both called
 // "tools" until the import block made the collision obvious.
 import * as boxTool from "./tools/box.js";
+import * as lineTool from "./tools/line.js";
+import * as obbTool from "./tools/obb.js";
+import * as pointTool from "./tools/point.js";
 import * as polygonTool from "./tools/polygon.js";
 import * as selectTool from "./tools/select.js";
 
@@ -77,6 +81,9 @@ class Editor {
       select: selectTool.create(this),
       box: boxTool.create(this),
       polygon: polygonTool.create(this),
+      line: lineTool.create(this),
+      point: pointTool.create(this),
+      obb: obbTool.create(this),
     };
     this.tool = this.tools.select;
 
@@ -463,6 +470,7 @@ class Editor {
       labelIdx: label.idx,
       bbox: geometry.bbox,
       polygon: geometry.polygon,
+      kind: geometry.kind || (geometry.polygon ? "polygon" : "box"),
       origin: "human",
       confidence: null,
       edited: false,
@@ -745,6 +753,26 @@ class Editor {
     return true;
   }
 
+  // Turn the selected polygons and rotated boxes about their centres.
+  rotateSelection(degrees) {
+    const selected = this.scene
+      .selected()
+      .filter((s) => s.polygon && s.polygon.length >= 3 && this.visible(s));
+    if (!selected.length) return false;
+    for (const shape of selected) {
+      const before = snapshot(shape);
+      const [cx, cy] = centroid(shape.polygon);
+      shape.polygon = rotatePoints(shape.polygon, cx, cy, (degrees * Math.PI) / 180);
+      rebuildBox(shape);
+      this.scene.clampShape(shape);
+      this.undo.push(changeGeometry(this.scene, shape.id, before, snapshot(shape)));
+      this.markEdited(shape);
+    }
+    this.scene.touch();
+    this.queueSave();
+    return true;
+  }
+
   // Tab walks the visible shapes. The only way to reach a small box buried
   // under a big one without moving the big one.
   cycleSelection(direction) {
@@ -928,6 +956,21 @@ class Editor {
         case "b":
           this.setTool("box");
           break;
+        case "k":
+          this.setTool("point");
+          break;
+        case "l":
+          this.setTool("line");
+          break;
+        case "o":
+          this.setTool("obb");
+          break;
+        case "[":
+        case "]": {
+          const step = (event.shiftKey ? 15 : 1) * (event.key === "[" ? -1 : 1);
+          if (this.rotateSelection(step)) event.preventDefault();
+          break;
+        }
         case "f":
           this.view.fit(this.canvas.getBoundingClientRect());
           this.scene.invalidate();
@@ -1224,6 +1267,7 @@ class Editor {
         labelIdx: label ? label.idx : -1,
         bbox: raw.bbox.slice(),
         polygon: raw.polygon ? raw.polygon.map((p) => p.slice()) : null,
+        kind: raw.kind || (raw.polygon ? "polygon" : "box"),
         origin: "model",
         confidence: raw.confidence ?? null,
         edited: false,
@@ -1285,7 +1329,16 @@ class Editor {
       else delete button.dataset.current;
     }
     this.canvas.style.cursor = name === "select" ? "default" : "crosshair";
-    this.say(`${name} tool`);
+    this.say(
+      {
+        select: "select tool",
+        box: "box tool: drag",
+        polygon: "polygon tool: click points, Enter to close",
+        line: "line tool: click points, Enter to finish",
+        point: "point tool: click",
+        obb: "rotated box: drag, then turn it with the handle or [ ]",
+      }[name] || `${name} tool`
+    );
   }
 
   cancelTool() {
@@ -1346,6 +1399,7 @@ class Editor {
           labelIdx: raw.label_idx,
           bbox: raw.bbox.slice(),
           polygon: raw.polygon ? raw.polygon.map((p) => p.slice()) : null,
+          kind: raw.kind || (raw.polygon ? "polygon" : "box"),
           origin: "human",
           confidence: null,
           edited: false,

@@ -96,6 +96,16 @@ PyPI · CI on GitHub Actions including the Playwright editor tests ·
 command · run the Dockerfile, the wheel and the PyInstaller build for real ·
 README with a 20-second GIF and an honest comparison page · make the repo public.
 
+### M2.5 — A desktop application *(first box →10, maturity +1)*
+
+The PyInstaller build already runs: a local server plus the system browser,
+the way Jupyter and Netron ship. What is missing is the feel of an
+application: a **native window** of its own (pywebview over the same server --
+no second codebase, no Electron), an icon, a folder-open dialog on launch
+instead of a URL, and an installer per platform (`.exe`, `.dmg`, AppImage)
+built in CI and attached to each release. One codebase still serves the pip
+install, the hosted service and the desktop app.
+
 ### M3 — AI assist *(AI 2→7)*
 
 A real sidecar distribution behind the existing protocol, installed by the
@@ -117,7 +127,13 @@ ours:
 disagreement, class confusion, probable missed objects. That last one is what
 FiftyOne and Lightly sell separately; here it is the default order of work.
 
-### M5 — Breadth *(types 3→6, video 1→2)*
+### M5 — Breadth *(types 3→6, video 1→2)* — **rotated boxes, lines, points done**
+
+Shipped as one `kind` on the shape: `obb` (YOLO-OBB and DOTA in and out,
+LabelMe `rotation`), `line` (LabelMe `linestrip`, CSV), `point` (LabelMe,
+COCO keypoint). Still open: multi-point keypoint *skeletons* (YOLO-pose, COCO
+`keypoints` with a category skeleton), image-level classification tags, and
+video interpolation.
 
 Rotated boxes (YOLO-OBB, DOTA) · keypoints (YOLO-pose, COCO keypoints) ·
 image-level classification tags · keyframe interpolation across frame

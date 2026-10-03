@@ -20,6 +20,17 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
 - Trackpad: two fingers pan, pinch zooms.
 - Next and previous images are decoded ahead of time, off the main thread.
 
+### Annotation types
+- Points (`K`, one click), lines (`L`, click points, Enter) and rotated
+  boxes (`O`: drag, then turn by the handle or `[` `]`), alongside boxes and
+  polygons. Corner-dragging a rotated box keeps it a rectangle.
+- Rotated boxes export as YOLO-OBB and DOTA and read back from both; DOTA
+  is a new format throughout (convert, inspect, export). LabelMe writes and
+  reads `point`, `linestrip` and `rotation`; COCO writes a point as a
+  visible keypoint; CSV carries a `kind` column.
+- Shapes saved in one burst used to come back in random order after a
+  reload, reshuffling what was on top. Order is now the order they were made.
+
 ### Correctness
 - Two saves racing could both pass the version check and silently drop or
   resurrect shapes. Saves are serialised in the editor and checked inside the

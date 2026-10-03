@@ -19,9 +19,9 @@ from collections.abc import Iterable, Sequence
 from pathlib import Path
 
 from ..fs import write_text_atomic
-from .model import Annotation, AnnotationError, Point, Shape
+from .model import Annotation, AnnotationError, KINDS, Point, Shape
 
-HEADER = ("filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax", "polygon")
+HEADER = ("filename", "width", "height", "class", "xmin", "ymin", "xmax", "ymax", "polygon", "kind")
 
 #: Header spellings other tools use, mapped onto ours.
 ALIASES = {
@@ -61,12 +61,12 @@ def write(annotations: Iterable[Annotation], path: Path) -> Path:
     for annotation in annotations:
         if annotation.is_background:
             writer.writerow(
-                [annotation.filename, annotation.width, annotation.height, "", "", "", "", "", ""]
+                [annotation.filename, annotation.width, annotation.height, "", "", "", "", "", "", ""]
             )
             continue
         for shape in annotation.shapes:
             polygon = ""
-            if shape.has_polygon:
+            if shape.has_polygon or (shape.is_line and shape.polygon):
                 assert shape.polygon is not None
                 polygon = " ".join(f"{int(x)} {int(y)}" for x, y in shape.polygon)
             writer.writerow(
@@ -77,6 +77,7 @@ def write(annotations: Iterable[Annotation], path: Path) -> Path:
                     shape.label,
                     *shape.bbox,
                     polygon,
+                    shape.shape_kind,
                 ]
             )
     # newline="" because csv already emitted its own \r\n terminators.
@@ -130,8 +131,14 @@ def read(path: Path) -> list[Annotation]:
         except (KeyError, ValueError) as exc:
             raise AnnotationError(f"{path.name}:{number}: bad coordinates") from exc
 
+        kind = (row.get(columns.get("kind", ""), "") or "").strip().lower()
         annotation.shapes.append(
-            Shape(label=label, bbox=bbox, polygon=_parse_polygon(row.get(columns.get("polygon", ""), "")))
+            Shape(
+                label=label,
+                bbox=bbox,
+                polygon=_parse_polygon(row.get(columns.get("polygon", ""), "")),
+                kind=kind if kind in KINDS else "",
+            )
         )
 
     for annotation in grouped.values():

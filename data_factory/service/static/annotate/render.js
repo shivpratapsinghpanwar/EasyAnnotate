@@ -13,7 +13,7 @@
 // solid. That reads at any zoom and survives colour-vision deficiency, which a
 // difference in hue would not -- and hue is already spent on the class.
 
-import { handlesOf } from "./hit.js";
+import { handlesOf, rotationHandle } from "./hit.js";
 import { mipFor } from "./viewport.js";
 
 const BACKGROUND = "#11100f";
@@ -75,16 +75,24 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
     ctx.globalAlpha =
       shape.confidence == null ? 1 : 0.35 + 0.65 * Math.max(0, Math.min(1, shape.confidence));
 
-    if (shape.polygon && shape.polygon.length >= 3) {
-      traceOutline(ctx, shape.polygon);
+    const kind = shape.kind || (shape.polygon && shape.polygon.length >= 3 ? "polygon" : "box");
+    if (kind === "point") {
+      drawPoint(ctx, shape.bbox, colour, unit, selected);
+    } else if (kind === "line" && shape.polygon && shape.polygon.length >= 2) {
+      tracePath(ctx, shape.polygon, false);
       ctx.stroke();
       if (selected) drawVertices(ctx, shape.polygon, colour, unit);
+    } else if (shape.polygon && shape.polygon.length >= 3) {
+      tracePath(ctx, shape.polygon, true);
+      ctx.stroke();
+      if (selected) drawVertices(ctx, shape.polygon, colour, unit);
+      if (selected && kind === "obb") drawRotationHandle(ctx, shape, colour, unit, view.scale);
     } else {
       const [x1, y1, x2, y2] = shape.bbox;
       ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
     }
 
-    if (selected) drawHandles(ctx, shape, colour, unit);
+    if (selected && (kind === "box" || kind === "polygon")) drawHandles(ctx, shape, colour, unit);
     ctx.globalAlpha = 1;
   }
 
@@ -142,11 +150,49 @@ function drawSize(ctx, bbox, { x, y }) {
   ctx.restore();
 }
 
-function traceOutline(ctx, polygon) {
+function tracePath(ctx, polygon, closed) {
   ctx.beginPath();
   ctx.moveTo(polygon[0][0], polygon[0][1]);
   for (let i = 1; i < polygon.length; i++) ctx.lineTo(polygon[i][0], polygon[i][1]);
-  ctx.closePath();
+  if (closed) ctx.closePath();
+}
+
+// A point is a ring with a dot: the ring reads at any zoom, and the hollow
+// between them leaves the pixel it marks visible.
+function drawPoint(ctx, [x, y], colour, unit, selected) {
+  ctx.setLineDash([]);
+  const r = (selected ? 9 : 7) * unit;
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.lineWidth = 2 * unit;
+  ctx.strokeStyle = "#ffffff";
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, r - 1.5 * unit, 0, Math.PI * 2);
+  ctx.strokeStyle = colour;
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(x, y, 2 * unit, 0, Math.PI * 2);
+  ctx.fillStyle = colour;
+  ctx.fill();
+}
+
+function drawRotationHandle(ctx, shape, colour, unit, scale) {
+  const handle = rotationHandle(shape, scale);
+  if (!handle) return;
+  const [[ax, ay], [bx, by]] = shape.polygon;
+  ctx.setLineDash([]);
+  ctx.lineWidth = 1.5 * unit;
+  ctx.strokeStyle = colour;
+  ctx.beginPath();
+  ctx.moveTo((ax + bx) / 2, (ay + by) / 2);
+  ctx.lineTo(handle[0], handle[1]);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.arc(handle[0], handle[1], HANDLE_SIZE * 1.2 * unit, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+  ctx.stroke();
 }
 
 function drawHandles(ctx, shape, colour, unit) {
@@ -179,7 +225,7 @@ function drawDraft(ctx, draft, unit) {
   if (draft.kind === "box") {
     const [x1, y1, x2, y2] = draft.bbox;
     ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
-  } else if (draft.kind === "polygon" && draft.points.length) {
+  } else if ((draft.kind === "polygon" || draft.kind === "line") && draft.points.length) {
     ctx.beginPath();
     ctx.moveTo(draft.points[0][0], draft.points[0][1]);
     for (let i = 1; i < draft.points.length; i++) {

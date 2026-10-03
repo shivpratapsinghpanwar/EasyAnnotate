@@ -13,6 +13,13 @@ from typing import Any
 
 Point = tuple[int, int]
 
+#: What a shape's geometry means. ``box`` and ``polygon`` are the originals;
+#: ``line`` is an open polyline (vertices in ``polygon``, no area); ``point``
+#: is one location (a degenerate ``bbox``); ``obb`` is a rotated box, stored as
+#: its four corners in ``polygon`` -- which is exactly what YOLO-OBB and DOTA
+#: write, so the export is a copy rather than a conversion.
+KINDS = ("box", "polygon", "line", "point", "obb")
+
 #: Version of the JSON shape/annotation form. Bump when a change would stop an
 #: older build reading a newer payload; ``Annotation.from_dict`` refuses
 #: anything newer than it understands rather than dropping fields silently.
@@ -45,11 +52,39 @@ class Shape:
     #: prediction from a human label, and what a confidence filter reads.
     confidence: float | None = None
 
+    #: One of :data:`KINDS`, or empty for the historical rule: a polygon if
+    #: there is an outline of three or more points, else a box. Readers that
+    #: predate kinds leave it empty and lose nothing.
+    kind: str = ""
+
+    @property
+    def shape_kind(self) -> str:
+        if self.kind:
+            return self.kind
+        return "polygon" if self.polygon is not None and len(self.polygon) >= 3 else "box"
+
     @property
     def has_polygon(self) -> bool:
-        # Fewer than three points cannot enclose an area, and COCO rejects a
-        # segmentation with under six numbers, so treat those as bbox-only.
-        return self.polygon is not None and len(self.polygon) >= 3
+        """Whether the outline encloses an area a mask could be made from.
+
+        Fewer than three points cannot, and COCO rejects a segmentation with
+        under six numbers, so those are bbox-only. A polyline has vertices but
+        no area, so it is *not* a polygon here -- that keeps every
+        segmentation writer from turning a lane marking into a sliver mask.
+        """
+        return (
+            self.polygon is not None
+            and len(self.polygon) >= 3
+            and self.shape_kind in ("polygon", "obb")
+        )
+
+    @property
+    def is_point(self) -> bool:
+        return self.shape_kind == "point"
+
+    @property
+    def is_line(self) -> bool:
+        return self.shape_kind == "line"
 
     @property
     def width(self) -> int:
@@ -65,6 +100,8 @@ class Shape:
 
     def polygon_area(self) -> float:
         """Shoelace area of the outline, falling back to the box."""
+        if self.shape_kind in ("point", "line"):
+            return 0.0
         if not self.has_polygon:
             return float(self.bbox_area)
         assert self.polygon is not None
@@ -108,6 +145,7 @@ class Shape:
             difficult=self.difficult,
             occluded=self.occluded,
             confidence=self.confidence,
+            kind=self.kind,
         )
 
     # -- wire format -------------------------------------------------------
@@ -129,6 +167,7 @@ class Shape:
             "difficult": self.difficult,
             "occluded": self.occluded,
             "confidence": self.confidence,
+            "kind": self.shape_kind,
         }
 
     @classmethod
@@ -161,6 +200,19 @@ class Shape:
             ymin, ymax = ymax, ymin
 
         polygon = _points_from(raw.get("polygon"), label)
+        kind = str(raw.get("kind") or "").strip().lower()
+        if kind and kind not in KINDS:
+            raise AnnotationError(f"{label}: unknown shape kind {kind!r}; known: {', '.join(KINDS)}")
+        if kind == "line" and (polygon is None or len(polygon) < 2):
+            raise AnnotationError(f"{label}: a line needs at least two points")
+        if kind == "obb" and (polygon is None or len(polygon) != 4):
+            raise AnnotationError(f"{label}: a rotated box needs exactly four corners")
+        if kind == "point":
+            polygon = None
+        # The two historical kinds are inferred from the geometry, so they are
+        # stored as empty: a shape must round-trip to *equal* itself.
+        if kind in ("box", "polygon"):
+            kind = ""
         confidence = raw.get("confidence")
         if confidence is not None:
             try:
@@ -177,6 +229,7 @@ class Shape:
             difficult=_flag(raw.get("difficult")),
             occluded=_flag(raw.get("occluded")),
             confidence=confidence,
+            kind=kind,
         )
 
 

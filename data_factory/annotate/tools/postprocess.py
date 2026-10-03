@@ -168,7 +168,6 @@ def simplify_polygon(
     if len(points) <= 3:
         return list(points)
 
-    import cv2
 
     contour = np.array([[list(p)] for p in points], dtype=np.int32)
     simplified = _simplify(contour, epsilon, max_vertices)

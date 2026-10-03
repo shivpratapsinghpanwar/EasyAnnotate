@@ -33,7 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from ..core import fs, imaging
-from ..core.annotations import formats, labelme, voc, yolo
+from ..core.annotations import dota, formats, labelme, voc, yolo
 from ..core.annotations.model import AnnotationError
 from ..core.types import Context
 from . import images as images_mod
@@ -84,7 +84,7 @@ def sidecar_path(project: projects_mod.Project, image: images_mod.Image) -> Path
         return image_path.with_suffix(".xml")
     if fmt == "labelme":
         return image_path.with_suffix(".json")
-    if fmt == "yolo":
+    if fmt in ("yolo", "dota"):
         # Honours the images/ <-> labels/ convention when the folder has one,
         # and falls back to a sidecar beside the image when it does not.
         return yolo.label_path_for(image_path, root)
@@ -116,6 +116,8 @@ def write_through(
             classes = yolo.ClassList(labels_mod.class_list(store, project))
             yolo.write(annotation, target, classes)
             _refresh_data_yaml(store, project, classes)
+        elif project.sidecar_format == "dota":
+            dota.write(annotation, target)
         else:
             return None
     except OSError as exc:

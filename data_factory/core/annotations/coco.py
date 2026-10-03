@@ -108,19 +108,25 @@ class CocoBuilder:
 
     def _add_shape(self, shape: Shape, image_id: int) -> None:
         xmin, ymin, xmax, ymax = shape.bbox
-        self.annotations.append(
-            {
-                "id": self._next_ann_id,
-                "image_id": image_id,
-                "category_id": self.categories.id_for(shape.label),
-                "bbox": [xmin, ymin, xmax - xmin, ymax - ymin],
-                "segmentation": [shape.flat_polygon()] if shape.has_polygon else [],
-                # Polygon area is the true mask area; falling back to the box
-                # keeps bbox-only objects comparable in COCO eval.
-                "area": round(shape.polygon_area(), 2),
-                "iscrowd": 0,
-            }
-        )
+        entry = {
+            "id": self._next_ann_id,
+            "image_id": image_id,
+            "category_id": self.categories.id_for(shape.label),
+            "bbox": [xmin, ymin, xmax - xmin, ymax - ymin],
+            "segmentation": [shape.flat_polygon()] if shape.has_polygon else [],
+            # Polygon area is the true mask area; falling back to the box
+            # keeps bbox-only objects comparable in COCO eval.
+            "area": round(shape.polygon_area(), 2),
+            "iscrowd": 0,
+        }
+        if shape.is_point:
+            # COCO has no point type; a visible keypoint with a one-pixel box
+            # is the form its keypoint evaluators and viewers both accept.
+            entry["bbox"] = [xmin, ymin, 1, 1]
+            entry["area"] = 1
+            entry["keypoints"] = [xmin, ymin, 2]
+            entry["num_keypoints"] = 1
+        self.annotations.append(entry)
         self._next_ann_id += 1
 
     def build(self) -> dict[str, Any]:
