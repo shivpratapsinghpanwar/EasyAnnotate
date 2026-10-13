@@ -94,7 +94,7 @@ class TestSpecs:
 class TestTheHappyPath:
     def test_describe_returns_the_tools(self, tool: LocalTool):
         specs = tool.describe()
-        assert [s.name for s in specs] == ["fake.box", "fake.text"]
+        assert [s.name for s in specs] == ["fake.box", "fake.text", "fake.model"]
         assert specs[0].kind == "interactive"
 
     def test_health_is_ready(self, tool: LocalTool):
@@ -253,7 +253,7 @@ class TestAbsenceIsNormal:
         registry = ToolRegistry()
         try:
             payload = registry.as_dict()
-            assert [t["name"] for t in payload["tools"]] == ["fake.box", "fake.text"]
+            assert [t["name"] for t in payload["tools"]] == ["fake.box", "fake.text", "fake.model"]
             assert payload["tools"][0]["health"]["state"] == "ready"
         finally:
             registry.close()

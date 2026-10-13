@@ -136,6 +136,29 @@ def build_parser() -> argparse.ArgumentParser:
     status = tools_sub.add_parser("status", help="what the editor will find")
     status.set_defaults(_handler=_cmd_tools_status)
 
+    predict = subparsers.add_parser(
+        "predict",
+        help="run a trained model over a project's unreviewed images, as predictions to review",
+    )
+    predict.add_argument("target", help="the folder you annotate, or a project id")
+    predict.add_argument("--model", help="an Ultralytics .pt; default: the project's latest trained model")
+    predict.add_argument("--conf", type=float, default=0.25, help="drop predictions below this confidence")
+    predict.add_argument("--workspace", help="where the annotation database lives")
+    predict.set_defaults(_handler=_cmd_predict)
+
+    trainer = subparsers.add_parser(
+        "train",
+        help="train a detector on the reviewed images, then predict the rest",
+    )
+    trainer.add_argument("target", help="the folder you annotate, or a project id")
+    trainer.add_argument("--epochs", type=int, default=30)
+    trainer.add_argument("--imgsz", type=int, default=640)
+    trainer.add_argument("--base", default="yolov8n.pt", help="the model to start from")
+    trainer.add_argument("--conf", type=float, default=0.25, help="for the predictions that follow")
+    trainer.add_argument("--no-predict", action="store_true", help="train only")
+    trainer.add_argument("--workspace", help="where the annotation database lives")
+    trainer.set_defaults(_handler=_cmd_train)
+
     desktop = subparsers.add_parser(
         "app", help="open EasyAnnotate in its own window (falls back to the browser)"
     )
@@ -434,6 +457,117 @@ def _cmd_tools_status(args: argparse.Namespace, out: TextIO, err: TextIO) -> int
     for tool in tools:
         out.write(f"  {tool['name']:<14} {tool.get('title', '')}  [{tool.get('version', '')}]\n")
     REGISTRY.close()
+    return 0
+
+
+def _loop_target(args: argparse.Namespace, err: TextIO):
+    """A folder (opened, or reopened, as an attached project) or a project id.
+    Returns (store, project, image_root) or None after explaining why not."""
+    import os
+
+    if args.workspace:
+        os.environ["DATAFACTORY_WORKSPACE"] = str(Path(args.workspace).expanduser())
+    from ..annotate import attach
+    from ..annotate import projects as projects_mod
+    from ..annotate.store import StoreError
+    from ..service.deps import get_store, media_root
+
+    store = get_store()
+    target = Path(args.target).expanduser()
+    try:
+        if target.is_dir():
+            project = attach.open_folder(store, target)["project"]
+        else:
+            project = projects_mod.get(store, args.target, "local")
+    except StoreError as exc:
+        err.write(f"{exc}\n")
+        return None
+    root = Path(project.root) if project.is_attached and project.root else media_root(project.id)
+    return store, project, root
+
+
+def _progress_line(out: TextIO):
+    last = [0.0]
+
+    def report(done: int, total: int, name: str) -> None:
+        now = time.time()
+        if done == total or now - last[0] > 0.5:
+            last[0] = now
+            out.write(f"\r  {done}/{total}  {name[:50]:<50}")
+            out.flush()
+        if done == total:
+            out.write("\n")
+
+    return report
+
+
+def _summarise_predictions(report: dict, project, out: TextIO) -> None:
+    out.write(
+        f"  {report['shapes']} prediction(s) on {report['predicted']} of {report['images']} "
+        f"unreviewed image(s) in {report['seconds']}s"
+        + (f"; {report['failed']} failed" if report["failed"] else "")
+        + "\n"
+    )
+    out.write(
+        "  review them hardest first: open the editor and pick\n"
+        "  'predicted, least sure first' in the image list.\n"
+    )
+
+
+def _cmd_predict(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from ..annotate import loop
+
+    found = _loop_target(args, err)
+    if found is None:
+        return 1
+    store, project, root = found
+    model = Path(args.model).expanduser() if args.model else loop.latest_model(project)
+    if model is None:
+        err.write("no model given and none trained for this project yet -- pass --model, or run train\n")
+        return 1
+    out.write(f"{project.name}: predicting with {model.name}\n")
+    try:
+        report = loop.predict(store, project, root, model, conf=args.conf, on_progress=_progress_line(out))
+    except loop.LoopError as exc:
+        err.write(f"{exc}\n")
+        return 1
+    _summarise_predictions(report, project, out)
+    return 0
+
+
+def _cmd_train(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from ..annotate import loop
+
+    found = _loop_target(args, err)
+    if found is None:
+        return 1
+    store, project, root = found
+    out.write(f"{project.name}\n")
+    try:
+        trained = loop.train(
+            store, project, epochs=args.epochs, imgsz=args.imgsz, base=args.base,
+            on_line=lambda line: (out.write(f"  {line}\n"), out.flush()),
+        )
+    except loop.LoopError as exc:
+        err.write(f"{exc}\n")
+        return 1
+    metrics = trained["metrics"]
+    score = metrics.get("metrics/mAP50(B)")
+    out.write(
+        f"  model saved: {trained['model']}"
+        + (f"  (mAP50 {score:.3f})" if isinstance(score, (int, float)) else "")
+        + "\n"
+    )
+    if args.no_predict:
+        return 0
+    out.write("predicting the unreviewed images with it\n")
+    try:
+        report = loop.predict(store, project, root, trained["model"], conf=args.conf,
+                              on_progress=_progress_line(out))
+    except loop.LoopError as exc:
+        err.write(f"{exc}\n")
+        return 1
+    _summarise_predictions(report, project, out)
     return 0
 
 

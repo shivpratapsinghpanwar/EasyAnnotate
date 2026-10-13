@@ -292,6 +292,25 @@ Then the Assist panel appears in the editor:
 Weights download on first use. A slow machine is fine: a tool that is still
 working says so and the editor waits, while you keep drawing.
 
+### The loop: train, predict, review hardest first
+
+```bash
+easyannotate train ./doors              # reviewed images -> a YOLO model -> predictions on the rest
+easyannotate predict ./doors --model best.pt   # or bring your own Ultralytics model
+```
+
+`train` exports exactly what export would (reviewed images, the project's own
+class order, so index 3 means in the model what it means in your files),
+trains in the tools environment, saves the model under
+`~/.datafactory/models`, and predicts every unreviewed image with it. Then pick
+**predicted, least sure first** in the editor's image list: images are ordered
+by how likely their predictions are wrong (ambiguous confidences, and boxes of
+two classes on one object), and `N`, `E` and `A` walk that queue. Each turn of
+the loop needs less of you than the last.
+
+Custom models run from the command line only: a `.pt` file is code, and no
+web route will ever load one.
+
 ### Model-assisted shapes
 
 Segmentation models can propose an outline; the editor shows a button for one

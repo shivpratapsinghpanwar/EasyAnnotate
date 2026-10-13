@@ -28,11 +28,14 @@ export class AssistPanel {
   }
 
   setTools(payload) {
-    this.tools = (payload && payload.tools) || [];
+    this.tools = ((payload && payload.tools) || []).filter((tool) => tool.kind !== "model");
     this.root.hidden = this.tools.length === 0;
     this.list.replaceChildren();
 
     for (const tool of this.tools) {
+      // A model-file tool is command-line only (`easyannotate predict`):
+      // loading one runs it, so the browser never gets a button for it.
+      if (tool.kind === "model") continue;
       if (tool.kind === "prompt") {
         this.list.append(this.promptNode(tool));
         continue;

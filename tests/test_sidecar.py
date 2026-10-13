@@ -135,7 +135,7 @@ def _ready(tool, lazy):
 def test_the_handshake_needs_no_torch():
     tool = sidecar.SidecarTool()
     specs = tool.describe()
-    assert [s["name"] for s in specs] == ["sam.box", "sam.point", "detect.text"]
+    assert [s["name"] for s in specs] == ["sam.box", "sam.point", "detect.text", "detect.model"]
     assert tool.health({"tool": "sam.box"})["state"] == "ready"
 
 

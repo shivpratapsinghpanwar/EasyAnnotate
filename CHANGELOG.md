@@ -20,6 +20,16 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
 - Trackpad: two fingers pan, pinch zooms.
 - Next and previous images are decoded ahead of time, off the main thread.
 
+### The loop
+- `easyannotate train FOLDER`: reviewed images become a YOLO model (trained in
+  the tools environment), which then predicts every unreviewed image.
+- `easyannotate predict FOLDER --model best.pt`: any Ultralytics detect,
+  segment or OBB model, as predictions to review. Command-line only: a model
+  file is code, and the HTTP routes refuse model tools outright.
+- Review queue: every image carries an uncertainty score (ambiguous
+  confidences, plus overlapping predictions of different classes), and
+  "predicted, least sure first" makes N, E and A walk it hardest first.
+
 ### AI assist
 - `easyannotate tools install` sets up a separate environment with PyTorch
   and Ultralytics; the editor discovers it with no configuration.
@@ -28,6 +38,9 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
   image -- the results land in the review queue as predictions.
 - A tool still loading or still computing answers "not ready" and keeps
   working; the editor retries quietly. CPU-only machines work.
+- SAM encodes the open image ahead of the first click: on a CPU, 0.17s per
+  click instead of ~3s, measured in the editor. Weights live in
+  `~/.datafactory/models`, not wherever the sidecar was started.
 
 ### Annotation types
 - Points (`K`, one click), lines (`L`, click points, Enter) and rotated

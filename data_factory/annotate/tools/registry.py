@@ -14,7 +14,7 @@ import sys
 from typing import Any
 
 from .local import LocalTool, python_for_tools
-from .protocol import Tool, ToolHealth, ToolSpec
+from .protocol import Tool, ToolHealth, ToolNotReady, ToolSpec
 
 #: Set to a module name to run that sidecar, e.g. ``data_factory.annotate.tools.fake``.
 #: The real SAM tool ships in a separate distribution and names itself here.
@@ -146,6 +146,24 @@ class ToolRegistry:
         """Run a tool. Raises ToolError subclasses, which the router maps to
         HTTP status codes."""
         return self.backend().invoke(name, payload)
+
+    def invoke_waiting(self, name: str, payload: dict[str, Any], *, budget_s: float = 300.0) -> dict[str, Any]:
+        """Run a tool, waiting through not_ready replies -- a model loading,
+        an image still being worked on -- for up to ``budget_s``. For batch
+        work, where nobody is watching a single request. Other errors raise."""
+        import time
+
+        deadline = time.time() + budget_s
+        while True:
+            try:
+                return self.backend().invoke(name, payload)
+            except ToolNotReady as exc:
+                if time.time() >= deadline:
+                    raise
+                time.sleep(max(0.2, (exc.retry_after_ms or 500) / 1000.0))
+
+    def spec(self, name: str) -> ToolSpec | None:
+        return next((s for s in self.available() if s.name == name), None)
 
     def close(self) -> None:
         backend = self._backend

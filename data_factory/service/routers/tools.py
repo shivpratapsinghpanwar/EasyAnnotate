@@ -29,9 +29,9 @@ from ...annotate import labels as labels_mod
 from ...annotate import projects as projects_mod
 from ...annotate import shapes as shapes_mod
 from ...annotate.store import Store, StoreError
-from ...annotate.tools import postprocess
 from ...annotate.tools.protocol import ToolError, ToolNotReady, ToolUnavailable
 from ...annotate.tools.registry import REGISTRY
+from ...annotate.tools.results import shapes_from_result as _shapes_from
 from ..deps import get_store, media_root, principal, require_key, resolve_media
 
 router = APIRouter(prefix="/api", tags=["tools"], dependencies=[Depends(require_key)])
@@ -92,6 +92,7 @@ def invoke_tool_batch(
         )
     if name not in {spec.name for spec in REGISTRY.available()}:
         raise HTTPException(404, f"no tool called {name!r} is installed")
+    _refuse_local_only(name)
 
     targets: list[Any] = []
     for state in wanted:
@@ -148,19 +149,26 @@ def invoke_tool_batch(
     return job.as_dict()
 
 
-def _invoke_patiently(name: str, payload: dict[str, Any], *, attempts: int = 40) -> Any:
+def _invoke_patiently(name: str, payload: dict[str, Any]) -> Any:
     """A tool still loading its weights says not_ready; wait for it. Anything
     else wrong with one image is that image's problem, not the job's."""
-    import time
+    try:
+        return REGISTRY.invoke_waiting(name, payload, budget_s=120.0)
+    except Exception:
+        return None
 
-    for _ in range(attempts):
-        try:
-            return REGISTRY.invoke(name, payload)
-        except ToolNotReady as exc:
-            time.sleep(max(0.2, getattr(exc, "retry_after_ms", 500) / 1000.0))
-        except Exception:
-            return None
-    return None
+
+def _refuse_local_only(name: str) -> None:
+    """A "model" tool loads a model file, and a model file is code: loading a
+    .pt unpickles it. Over HTTP that would let a client name any file to run
+    on the server. Like attached folders, these run from the command line
+    only -- `easyannotate predict` -- where the path comes from a person
+    typing it into their own terminal."""
+    spec = REGISTRY.spec(name)
+    if spec is not None and spec.kind == "model":
+        raise HTTPException(
+            403, f"{name!r} runs a model file, which is code; use `easyannotate predict` instead"
+        )
 
 
 class PrepareIn(BaseModel):
@@ -181,6 +189,7 @@ def prepare_tool(
     every navigation once a SAM tool is in use, and a failure here must
     never be something the person sees.
     """
+    _refuse_local_only(name)
     try:
         project = projects_mod.get(store, project_id, owner)
         image = images_mod.get(store, project, body.image_id)
@@ -213,6 +222,7 @@ def invoke_tool(
     mask, and what the editor needs is an outline with a manageable number of
     draggable vertices. See ``annotate/tools/postprocess.py``.
     """
+    _refuse_local_only(name)
     try:
         project = projects_mod.get(store, project_id, owner)
         image = images_mod.get(store, project, body.image_id)
@@ -272,74 +282,3 @@ def invoke_tool(
         ],
         "detail": result.get("detail", "") if isinstance(result, dict) else "",
     }
-
-
-def _shapes_from(result: Any, label: str, width: int, height: int) -> list[Any]:
-    """Read a tool's reply into shapes, whichever form it used.
-
-    A tool may answer with a mask, with polygons, or with boxes. All three are
-    reasonable things for a model to produce, and none of them should require
-    a different endpoint.
-    """
-    if not isinstance(result, dict):
-        return []
-    made = []
-    name = label or "object"
-
-    from ...core.annotations.model import AnnotationError, Shape
-
-    # Ready-made shapes: the most natural form for a tool to answer in, and
-    # what the reference sidecar uses. Parsed through Shape.from_dict because
-    # a sidecar is a separate process -- possibly a third party's -- and its
-    # output is no more trusted than a browser's.
-    for raw in result.get("shapes") or []:
-        if not isinstance(raw, dict):
-            continue
-        payload = dict(raw)
-        if label:
-            payload["label"] = label
-        payload.setdefault("label", name)
-        try:
-            shape = Shape.from_dict(payload)
-        except AnnotationError:
-            continue
-        if shape.polygon and len(shape.polygon) > 3:
-            shape.polygon = postprocess.simplify_polygon(shape.polygon)
-        made.append(shape.clamped(width, height) if width and height else shape)
-
-    mask = result.get("mask")
-    if mask is not None:
-        shape = postprocess.mask_to_shape(
-            mask, name, width, height, confidence=result.get("score")
-        )
-        if shape is not None:
-            made.append(shape)
-
-    for polygon in result.get("polygons") or []:
-        points = [(int(x), int(y)) for x, y in polygon]
-        if len(points) < 3:
-            continue
-        simplified = postprocess.simplify_polygon(points)
-        xs = [p[0] for p in simplified]
-        ys = [p[1] for p in simplified]
-        made.append(
-            Shape(
-                label=name,
-                bbox=(min(xs), min(ys), max(xs), max(ys)),
-                polygon=simplified,
-                confidence=result.get("score"),
-            ).clamped(width, height)
-        )
-
-    for box in result.get("boxes") or []:
-        try:
-            x1, y1, x2, y2 = (int(v) for v in box[:4])
-        except (TypeError, ValueError):
-            continue
-        made.append(
-            Shape(label=name, bbox=(x1, y1, x2, y2), confidence=result.get("score")).clamped(
-                width, height
-            )
-        )
-
-    return made

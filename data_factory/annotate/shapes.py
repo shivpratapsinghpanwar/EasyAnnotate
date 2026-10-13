@@ -209,6 +209,7 @@ def save(
 
     seen: set[str] = set()
     now = time.time()
+    model_inserts = 0
 
     with store.write() as conn:
         # Check and read again *inside* the transaction. The check above is
@@ -270,6 +271,14 @@ def save(
                 result.ids.append(prior.id)
             else:
                 fresh = new_id()
+                # A new shape that carries a confidence came from a model --
+                # a text prompt run on one image, say -- and stays a
+                # prediction: dashed, reviewable, counted by agreement. Saving
+                # it through the editor used to turn it into hand-drawn work.
+                row_origin = origin
+                if origin == "human" and shape.confidence is not None:
+                    row_origin = "model"
+                    model_inserts += 1
                 conn.execute(
                     "INSERT INTO shape (id, image_id, project_id, label_idx, xmin,"
                     " ymin, xmax, ymax, polygon, origin, confidence, pose, truncated,"
@@ -277,7 +286,7 @@ def save(
                     " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                     (
                         fresh, image.id, project.id, label_idx, xmin, ymin, xmax,
-                        ymax, polygon, origin, shape.confidence, shape.pose,
+                        ymax, polygon, row_origin, shape.confidence, shape.pose,
                         shape.truncated, shape.difficult, shape.occluded,
                         # Distinct per shape, in submission order. Listing
                         # sorts by created_at, and shapes saved in one burst
@@ -298,6 +307,13 @@ def save(
         state = image.state
         if advance_state and state in ("todo", "predicted"):
             state = "in_progress"
+        if model_inserts:
+            # Predictions the editor added count in agreement's denominator,
+            # so deleting one later still registers as a correction.
+            conn.execute(
+                "UPDATE image SET predicted_count = predicted_count + ? WHERE id = ?",
+                (model_inserts, image.id),
+            )
         updated = conn.execute(
             "UPDATE image SET version = ?, state = ?, updated_at = ?"
             " WHERE id = ? AND version = ?",

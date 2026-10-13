@@ -129,7 +129,11 @@ ours:
 - CPU path (ONNX MobileSAM/EfficientSAM) so it works without CUDA.
 - Encode-ahead for the next image, as planned in `PLAN.md` Phase 3.
 
-### M4 — Close the loop *(loop 7→9, AI 7→8)*
+### M4 — Close the loop *(loop 7→9, AI 7→8)* — **done: train, predict, uncertainty queue**
+
+`easyannotate train` / `easyannotate predict` (CLI-only: model files are
+code) and an uncertainty-ordered review queue. Still open: the editor
+starting a training run itself, and "probable missed objects".
 
 `detect.infer`: any Ultralytics `.pt` over unreviewed images into a
 `model_run` · "train on reviewed" via Ultralytics in the sidecar ·

@@ -102,3 +102,17 @@ def test_the_api_orders_and_locates_by_uncertainty(tmp_path, monkeypatch):
         assert located.json()["position"] == 1
         assert client.get(base, params={"order": "random"}).status_code == 400
     deps.reset_stores()
+
+
+def test_a_scored_shape_saved_from_the_editor_stays_a_prediction(store, project):
+    """'Find every person' on one image adds shapes with a confidence through
+    the ordinary save. They used to be stored as hand-drawn work -- solid,
+    not reviewable, invisible to agreement."""
+    image = images.by_path(store, project, "empty.jpg")
+    shapes.save(
+        store, project, image,
+        [(None, box("door", 10, 10, 90, 190, 0.61)), (None, Shape(label="door", bbox=(100, 10, 150, 60)))],
+    )
+    stored = shapes.listing(store, project, images.get(store, project, image.id))
+    assert [(s.origin, s.shape.confidence) for s in stored] == [("model", 0.61), ("human", None)]
+    assert shapes.agreement(store, project)["unreviewed"] == 1

@@ -87,6 +87,9 @@ index, retiring keeps the slot, new classes append. It used to be
 - `annotate/` must not import fastapi.
 - **Clients never send filesystem paths.** Path-kind params are *refused, not
   sanitised*. Attached projects are CLI-only for exactly this reason.
+- **No HTTP route loads a model file.** A `.pt` is a pickle: loading it runs
+  it. Tools of kind `"model"` are refused by every tools route and hidden from
+  the editor; `easyannotate predict/train` are the only way in.
 - Every operation declares its params once (`core/registry.py`); CLI, menu,
   recipe validator and web form are all generated from that.
 - Editor JS: no `innerHTML`. `<template>` + `cloneNode` + `textContent`.

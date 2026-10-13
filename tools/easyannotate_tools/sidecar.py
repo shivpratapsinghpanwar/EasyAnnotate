@@ -76,7 +76,25 @@ SPECS = [
         version="yolov8s-worldv2",
         requires=(),
     ),
+    # Command-line only: the editor never shows it and the HTTP routes refuse
+    # it, because loading a model file runs it. `easyannotate predict`.
+    ToolSpec(
+        name="detect.model",
+        title="Predict with a trained model",
+        summary="Runs an Ultralytics model (detect, segment or OBB) over an image.",
+        kind="model",
+        inputs={
+            "type": "object",
+            "properties": {"model": {"type": "string"}, "conf": {"type": "number"}},
+            "required": ["model"],
+        },
+        version="ultralytics",
+        requires=(),
+    ),
 ]
+#: Custom models kept loaded, most recent last. Two: the one in use, and the
+#: one it is being compared against.
+MAX_CUSTOM_MODELS = 2
 
 
 class _Lazy:
@@ -185,6 +203,7 @@ class SidecarTool:
         # across versions would be brittle.
         self._sam_key: str | None = None
         self._want_key: str | None = None
+        self._custom_models: dict[str, Any] = {}
 
     # -- protocol ----------------------------------------------------------
 
@@ -295,6 +314,8 @@ class SidecarTool:
             if not (isinstance(points, (list, tuple)) and points):
                 raise ToolError("sam.point needs points=[[x, y], ...]")
             shapes = self._sam(path, params, points=[[float(x), float(y)] for x, y in points], labels=[1] * len(points))
+        elif name == "detect.model":
+            shapes = self._custom(path, params)
         elif name == "detect.text":
             text = str(params.get("text") or "").strip()
             if not text:
@@ -333,6 +354,58 @@ class SidecarTool:
                 shape = postprocess.mask_to_shape(array, "object", width, height)
                 if shape is not None:
                     shapes.append(shape.as_dict())
+        return shapes
+
+    def _custom(self, path: Path, params: dict[str, Any]) -> list[dict[str, Any]]:
+        weights = Path(str(params.get("model") or ""))
+        if not weights.is_file():
+            raise ToolError(f"no model file at {weights}")
+        key = f"{weights}|{weights.stat().st_mtime_ns}"
+        model = self._custom_models.pop(key, None)
+        if model is None:
+            from ultralytics import YOLO
+
+            model = YOLO(str(weights))
+        self._custom_models[key] = model
+        while len(self._custom_models) > MAX_CUSTOM_MODELS:
+            self._custom_models.pop(next(iter(self._custom_models)))
+
+        conf = float(params.get("conf") or 0.25)
+        results = model.predict(str(path), device=_device(), conf=conf, max_det=MAX_DETECTIONS, verbose=False)
+        names = getattr(model, "names", {}) or {}
+        shapes: list[dict[str, Any]] = []
+        for result in results:
+            obb = getattr(result, "obb", None)
+            if obb is not None and len(obb):
+                for corners, score, cls in zip(obb.xyxyxyxy.tolist(), obb.conf.tolist(), obb.cls.tolist()):
+                    points = [[int(round(x)), int(round(y))] for x, y in corners]
+                    xs = [p[0] for p in points]
+                    ys = [p[1] for p in points]
+                    shapes.append({
+                        "label": str(names.get(int(cls), int(cls))),
+                        "bbox": [min(xs), min(ys), max(xs), max(ys)],
+                        "polygon": points,
+                        "kind": "obb",
+                        "confidence": round(float(score), 4),
+                    })
+                continue
+            boxes = result.boxes
+            if boxes is None:
+                continue
+            outlines = result.masks.xy if getattr(result, "masks", None) is not None else None
+            for index, (xyxy, score, cls) in enumerate(zip(boxes.xyxy.tolist(), boxes.conf.tolist(), boxes.cls.tolist())):
+                x1, y1, x2, y2 = (int(round(v)) for v in xyxy)
+                polygon = None
+                if outlines is not None and index < len(outlines) and len(outlines[index]) >= 3:
+                    # Already in image coordinates -- unlike masks.data, which
+                    # is at the model's input size.
+                    polygon = [[int(round(x)), int(round(y))] for x, y in outlines[index].tolist()]
+                shapes.append({
+                    "label": str(names.get(int(cls), int(cls))),
+                    "bbox": [x1, y1, x2, y2],
+                    "polygon": polygon,
+                    "confidence": round(float(score), 4),
+                })
         return shapes
 
     def _world(self, path: Path, text: str, min_confidence: float) -> list[dict[str, Any]]:

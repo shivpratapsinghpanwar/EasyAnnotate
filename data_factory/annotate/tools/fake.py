@@ -55,6 +55,21 @@ SPECS = [
         version="1",
         requires=(),
     ),
+    # A model-kind tool, so `predict` and the HTTP refusal can be tested
+    # without torch. Its "model" is any file; it labels boxes with its stem.
+    ToolSpec(
+        name="fake.model",
+        title="Fake trained model",
+        summary="Returns one box labelled with the model file's stem.",
+        kind="model",
+        inputs={
+            "type": "object",
+            "properties": {"model": {"type": "string"}},
+            "required": ["model"],
+        },
+        version="1",
+        requires=(),
+    ),
 ]
 
 
@@ -92,6 +107,18 @@ class FakeTool:
             raise SystemExit                  # a BaseException, not an Exception
         if behaviour == "unknown_tool":
             raise ToolError("no such tool", code="unknown_tool")
+
+        if str(params.get("tool") or "") == "fake.model":
+            model = str(params.get("model") or "")
+            if not model or not os.path.isfile(model):
+                raise ToolError(f"no model file at {model}")
+            label = os.path.splitext(os.path.basename(model))[0]
+            return {
+                "shapes": [
+                    {"label": label, "bbox": [10, 10, 50, 40], "polygon": None, "confidence": 0.42}
+                ],
+                "ms": WORK_MS,
+            }
 
         if str(params.get("tool") or "") == "fake.text":
             text = str(params.get("text") or "").strip()
