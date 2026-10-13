@@ -62,6 +62,10 @@ from .workspace import (
     make_zip,
     resolve_workspace_root,
 )
+from ..annotate import images as images_mod
+from ..annotate import projects as projects_mod
+from ..annotate.store import Store, StoreError
+from .deps import get_store, principal, store_path
 
 WORKSPACE = Workspace(
     resolve_workspace_root(),
@@ -280,6 +284,77 @@ def run_operation(dataset_id: str, name: str, request: RunRequest) -> dict[str, 
         output_name=output_dir.name if output_dir else "",
     )
     return job.as_dict()
+
+
+class ExportRequest(BaseModel):
+    to: str = "yolo"
+    states: list[str] = Field(default_factory=lambda: ["reviewed"])
+    copy_images: bool = True
+    segmentation: bool = True
+    include_empty: bool = True
+
+
+@app.post("/api/projects/{project_id}/export", dependencies=[Depends(require_key)])
+def export_project(
+    project_id: str,
+    request: ExportRequest,
+    store: Store = Depends(get_store),
+    owner: str = Depends(principal),
+) -> dict[str, Any]:
+    """Export a project as a dataset the browser can download.
+
+    The one bridge from the annotation world back to the batch world: the
+    same annotate.export operation the CLI runs, as a job, into a throwaway
+    workspace sandbox, with the download URL handed back up front. Nothing in
+    the request is a path -- the database, the output folder and the image
+    root are all resolved here, which is what lets this exist on the hosted
+    service where no client may ever name a file.
+
+    Without this a hosted user could annotate and never get their work out.
+    """
+    try:
+        project = projects_mod.get(store, project_id, owner)
+    except StoreError as exc:
+        raise HTTPException(404, str(exc)) from None
+    if request.to not in formats.FORMATS:
+        raise HTTPException(400, f"unknown format {request.to!r}; known: {', '.join(formats.FORMATS)}")
+    unknown = [s for s in request.states if s not in images_mod.STATES]
+    if unknown or not request.states:
+        raise HTTPException(
+            400, f"states must be some of {', '.join(images_mod.STATES)}; got {request.states!r}"
+        )
+
+    operation = registry.get("annotate.export")
+    sandbox = WORKSPACE.create()
+    output_dir = sandbox.output("export")
+    bound: dict[str, Any] = {param.name: param.default for param in operation.params}
+    bound.update(
+        {
+            "database": store_path(),
+            "project": project.id,
+            "output": output_dir,
+            "to": request.to,
+            "states": list(request.states),
+            "owner": owner,
+            "copy_images": request.copy_images,
+            "segmentation": request.segmentation,
+            "include_empty": request.include_empty,
+        }
+    )
+
+    job_id = secrets.token_hex(8)
+
+    def work(context):
+        result = operation.func(bound, context)
+        _record(operation.name, bound, result)
+        return result
+
+    job = JOBS.submit(job_id, operation.name, sandbox.id, work, output_name="export")
+    return {
+        **job.as_dict(),
+        "dataset": sandbox.id,
+        "download": f"/api/datasets/{sandbox.id}/download?output=export",
+    }
 
 
 @app.get("/api/jobs/{job_id}", dependencies=[Depends(require_key)])

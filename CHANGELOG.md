@@ -50,6 +50,9 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
   importing predictions and every class change now write through too.
 
 ### Service
+- `POST /api/projects/{id}/export`: a hosted user can download their dataset
+  in any format. Reviewed images only unless asked; skipped images never.
+  The editor has an Export button for it.
 - Oversized uploads are refused on the declared length before any body is
   read; archive extraction and prediction import run off the event loop.
 - Thumbnails refuse decompression bombs and decode large JPEGs reduced.

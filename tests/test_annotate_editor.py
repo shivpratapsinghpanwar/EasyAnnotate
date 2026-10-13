@@ -1011,3 +1011,30 @@ def test_the_folder_button_appears_only_inside_the_window(browser, service, anno
     finally:
         page.close()
     assert not errors, errors
+
+
+# ----------------------------------------------------------- export button
+
+
+def test_the_export_button_downloads_a_dataset(browser, service, bare_images):
+    errors: list[str] = []
+    project = make_project(service, bare_images, "export")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        _draw_named_box(page, "Open")
+        page.keyboard.press("r")  # reviewed, and on to the next image
+        page.wait_for_timeout(600)
+        page.select_option("#export-format", "coco")
+        with page.expect_download(timeout=30_000) as pending:
+            page.click("#btn-export")
+        download = pending.value
+        assert download.suggested_filename.endswith(".zip")
+        import io as _io
+        import zipfile as _zipfile
+
+        saved = download.path()
+        names = _zipfile.ZipFile(saved).namelist()
+        assert any(n.endswith(".json") for n in names), names
+    finally:
+        page.close()
+    assert not errors, errors

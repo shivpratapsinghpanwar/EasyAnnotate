@@ -159,6 +159,14 @@ export class Api {
     return this.get(`/api/projects/${projectId}/summary`);
   }
 
+  exportProject(projectId, options) {
+    return this.post(`/api/projects/${projectId}/export`, options);
+  }
+
+  job(jobId) {
+    return this.get(`/api/jobs/${jobId}`);
+  }
+
   accept(projectId, imageId) {
     return this.post(`/api/projects/${projectId}/images/${imageId}/accept`);
   }

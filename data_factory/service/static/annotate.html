@@ -150,6 +150,10 @@
   .shape-item [data-role="meta"] { color: var(--dim); font-size: 11px; }
 
   .hint { padding: 8px 10px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
+  select.plain {
+    background: #1d1d1a; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 5px; font: inherit; padding: 5px 6px;
+  }
 
   #help {
     position: fixed; inset: 0; background: rgba(6,6,5,.9);
@@ -289,6 +293,25 @@
     <div style="padding:8px 10px;border-top:1px solid var(--line)">
       <button id="btn-predictions" style="width:100%">Load model predictions…</button>
       <input id="predictions-file" type="file" accept=".zip,.json" hidden>
+    </div>
+    <div id="export" style="padding:8px 10px;border-top:1px solid var(--line)">
+      <div style="display:flex;gap:6px">
+        <select id="export-format" class="plain" title="Export format" style="flex:1">
+          <option value="yolo">YOLO</option>
+          <option value="coco">COCO</option>
+          <option value="voc">Pascal VOC</option>
+          <option value="labelme">LabelMe</option>
+          <option value="dota">DOTA</option>
+          <option value="csv">CSV</option>
+        </select>
+        <button id="btn-export" style="flex:1" title="Download the dataset">Export…</button>
+      </div>
+      <label style="font-size:11px;color:var(--dim);display:flex;gap:5px;align-items:center;margin-top:6px">
+        <input id="export-all" type="checkbox"> include unreviewed images
+      </label>
+      <div class="hint" style="border-top:none;padding:4px 0 0">
+        Reviewed images only, unless ticked. Skipped images are never exported.
+      </div>
     </div>
     <template data-role="label-item">
       <div class="label-item">

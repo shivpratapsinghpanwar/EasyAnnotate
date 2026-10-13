@@ -496,3 +496,64 @@ def test_a_project_exports_through_the_operation(client, clean_dataset, tmp_path
     assert result.ok, result.errors
     assert result.counts["objects"] == 6
     assert (tmp_path / "exported" / "data.yaml").is_file()
+
+
+# ----------------------------------------------------------------- export
+
+
+def test_a_hosted_user_can_download_their_dataset(client, tmp_path):
+    """Reviewed images only by default; the download is a real YOLO dataset."""
+    import io as _io
+    import time
+    import zipfile as _zipfile
+
+    from conftest import make_image
+
+    folder = tmp_path / "set"
+    make_image(folder / "done.jpg", 1)
+    make_image(folder / "later.jpg", 2)
+    dataset_id = upload(client, folder)
+    project = client.post(f"/api/datasets/{dataset_id}/promote", json={}).json()
+    listed = client.get(f"/api/projects/{project['id']}/images").json()["images"]
+    done = next(i for i in listed if i["name"] == "done.jpg")
+
+    detail = client.get(f"/api/projects/{project['id']}/images/{done['id']}").json()
+    saved = client.put(
+        f"/api/projects/{project['id']}/images/{done['id']}/shapes",
+        json={"version": detail["version"], "shapes": [box("Open", 10, 10, 60, 70)]},
+    )
+    assert saved.status_code == 200, saved.text
+    assert client.patch(
+        f"/api/projects/{project['id']}/images/{done['id']}", json={"state": "reviewed"}
+    ).status_code == 200
+
+    started = client.post(f"/api/projects/{project['id']}/export", json={"to": "yolo"})
+    assert started.status_code == 200, started.text
+    job = started.json()
+    deadline = time.time() + 30
+    while job["state"] not in ("finished", "failed", "cancelled") and time.time() < deadline:
+        time.sleep(0.2)
+        job = client.get(f"/api/jobs/{job['id']}").json()
+    assert job["state"] == "finished", job
+
+    archive = client.get(started.json()["download"])
+    assert archive.status_code == 200, archive.text
+    names = _zipfile.ZipFile(_io.BytesIO(archive.content)).namelist()
+    assert any(n.endswith("data.yaml") for n in names)
+    labels = [n for n in names if n.endswith(".txt")]
+    assert labels == ["labels/train/done.txt"], names  # the unreviewed image stays out
+    assert "images/train/done.jpg" in names
+
+
+def test_export_refuses_an_unknown_format_or_state(client, tmp_path):
+    from conftest import make_image
+
+    folder = tmp_path / "set"
+    make_image(folder / "a.jpg", 1)
+    dataset_id = upload(client, folder)
+    project = client.post(f"/api/datasets/{dataset_id}/promote", json={}).json()
+    assert client.post(f"/api/projects/{project['id']}/export", json={"to": "tfrecord"}).status_code == 400
+    assert client.post(
+        f"/api/projects/{project['id']}/export", json={"to": "yolo", "states": ["done"]}
+    ).status_code == 400
+    assert client.post("/api/projects/0123456789abcdef0123456789abcdef/export", json={}).status_code == 404

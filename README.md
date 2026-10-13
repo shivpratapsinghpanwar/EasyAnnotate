@@ -10,7 +10,12 @@ them at a few images a minute. Export a dataset that is correct by construction.
 pip install easyannotate
 easyannotate demo                  # a sample project opens in your browser
 easyannotate annotate ./my-images  # your own folder: labels are written in place
+easyannotate app                   # or a desktop window, with an Open-folder button
 ```
+
+Or download the desktop app for Windows, macOS or Linux from the
+[releases page](https://github.com/shivpratapsinghpanwar/EasyAnnotate/releases) —
+no Python needed.
 
 No account, no server, no Docker, no project template, no label schema. Your
 images never leave your machine. Python 3.12+, Windows, macOS and Linux.
@@ -36,6 +41,7 @@ What you get instead:
   datasets cannot happen by accident.
 - **No Save button.** Edits are saved 400ms after you stop and before you
   navigate. Reopening a project resumes on the first unfinished image.
+  **Export…** downloads the dataset in any format, from the editor.
 - **The model loop is the product.** Import predictions from any YOLO, COCO,
   VOC or LabelMe run; they arrive dashed with a confidence slider; `A` accepts
   an image. An agreement figure tells you when to retrain and when to stop.

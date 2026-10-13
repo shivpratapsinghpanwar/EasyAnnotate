@@ -1,0 +1,93 @@
+# A version tag builds everything a user can download and attaches it to a
+# GitHub Release: the wheel and sdist, and a desktop bundle per platform.
+#
+#   git tag v0.4.0 && git push --tags
+#
+# Publishing to PyPI is deliberately a separate, manual step: `uv publish`
+# from the dist/ artifact, by the owner, once. A release that goes to PyPI
+# automatically on every tag is one typo away from an unwanted version.
+#
+# The desktop bundles are unsigned here. Windows SmartScreen and macOS
+# Gatekeeper will warn until a code-signing certificate and an Apple
+# notarisation step are added -- see DEPLOYING.md.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  wheel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheel
+          path: dist/
+
+  desktop:
+    name: desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            bundle: EasyAnnotate-windows-x64
+          - os: macos-latest
+            bundle: EasyAnnotate-macos-arm64
+          - os: ubuntu-latest
+            bundle: EasyAnnotate-linux-x64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - run: uv sync --all-extras
+      - run: uv pip install pyinstaller
+      # pywebview's Linux backend wants GTK or Qt at build time for its hooks.
+      - if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libgirepository1.0-dev gir1.2-webkit2-4.1 || true
+      - run: uv run pyinstaller --noconfirm packaging/easyannotate.spec
+      # The bundle must start and answer before it is worth shipping.
+      - shell: bash
+        env:
+          EASYANNOTATE_NO_WINDOW: "1"
+          BROWSER: "no-such-browser"
+        run: |
+          if [ "$RUNNER_OS" = "Windows" ]; then exe=dist/EasyAnnotate/EasyAnnotate.exe; else exe=dist/EasyAnnotate/EasyAnnotate; fi
+          "$exe" > launch.log 2>&1 &
+          for i in $(seq 1 60); do grep -q "interface" launch.log && break; sleep 1; done
+          port=$(grep -o "127.0.0.1:[0-9]*" launch.log | head -1 | cut -d: -f2)
+          curl -fs "http://127.0.0.1:$port/api/health"
+          cat launch.log
+      - shell: bash
+        run: |
+          cd dist && if [ "$RUNNER_OS" = "Windows" ]; then 7z a -tzip "../${{ matrix.bundle }}.zip" EasyAnnotate; else zip -qr "../${{ matrix.bundle }}.zip" EasyAnnotate; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.bundle }}
+          path: ${{ matrix.bundle }}.zip
+
+  publish:
+    needs: [wheel, desktop]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            artifacts/wheel/*
+            artifacts/*/*.zip
+          generate_release_notes: true

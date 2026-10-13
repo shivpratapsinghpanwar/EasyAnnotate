@@ -1092,6 +1092,7 @@ class Editor {
     slider.addEventListener("change", () => slider.blur());
 
     document.getElementById("btn-accept").addEventListener("click", () => this.acceptAll());
+    document.getElementById("btn-export").addEventListener("click", () => this.exportProject());
 
     const picker = document.getElementById("predictions-file");
     document.getElementById("btn-predictions").addEventListener("click", () => picker.click());
@@ -1223,6 +1224,41 @@ class Editor {
       else this.say("that was the last image");
     } catch (error) {
       this.say(describe(error));
+    }
+  }
+
+  // -- export ---------------------------------------------------------------
+
+  // The download is the point of all of this. Reviewed images only, unless
+  // asked -- and skipped ones never, which is a promise, not a default.
+  async exportProject() {
+    if (!this.projectId) return;
+    await this.flushSave();
+    const to = document.getElementById("export-format").value;
+    const everything = document.getElementById("export-all").checked;
+    const button = document.getElementById("btn-export");
+    button.disabled = true;
+    this.say(`exporting as ${to.toUpperCase()}, ${everything ? "every image except skipped" : "reviewed images only"}…`);
+    try {
+      const job = await this.api.exportProject(this.projectId, {
+        to,
+        states: everything ? ["todo", "predicted", "in_progress", "reviewed"] : ["reviewed"],
+      });
+      let status = job;
+      while (!["finished", "failed", "cancelled"].includes(status.state)) {
+        await pause(600);
+        status = await this.api.job(job.id);
+      }
+      if (status.state !== "finished") {
+        this.say(`export ${status.state}: ${status.error || "no detail"}`);
+        return;
+      }
+      this.say("export ready — downloading");
+      window.location = job.download;
+    } catch (error) {
+      this.say(describe(error));
+    } finally {
+      button.disabled = false;
     }
   }
 
@@ -1446,6 +1482,10 @@ function writePreference(key, value) {
   } catch {
     // Not persisted; still applied for this session.
   }
+}
+
+function pause(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function isTypingTarget(node) {
