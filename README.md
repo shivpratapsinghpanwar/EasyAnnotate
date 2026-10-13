@@ -277,6 +277,9 @@ easyannotate tools install --gpu   # CUDA build of PyTorch first
 easyannotate tools status          # what the editor will find
 ```
 
+From a source checkout, before the first PyPI release:
+`easyannotate tools install --source .`
+
 Then the Assist panel appears in the editor:
 
 - **Outline (SAM)** — drag a box, or click, on an object: SAM 2.1 traces it

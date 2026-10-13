@@ -96,7 +96,11 @@ PyPI · CI on GitHub Actions including the Playwright editor tests ·
 command · run the Dockerfile, the wheel and the PyInstaller build for real ·
 README with a 20-second GIF and an honest comparison page · make the repo public.
 
-### M2.5 — A desktop application *(first box →10, maturity +1)*
+### M2.5 — A desktop application *(first box →10, maturity +1)* — **done, unsigned**
+
+`easyannotate app` and the PyInstaller binary open a native pywebview window
+with an Open-folder button (OS dialog; the page only ever gets a project id).
+Verified running here. Still open: icon, installers, code signing.
 
 The PyInstaller build already runs: a local server plus the system browser,
 the way Jupyter and Netron ship. What is missing is the feel of an

@@ -33,9 +33,17 @@ the first box. Removing that is the entire product argument.
 ## State
 
 **Phases 0–4 of `docs/PLAN.md` are done; of `docs/ROADMAP.md`, M0 (trust),
-M1 (editor essentials), M2 (shipping: `easyannotate` on the command line, CI,
-demo, wheel and binary both run) and the rotated-box/line/point half of M5.**
-665 tests pass, including 27 browser tests (install playwright to run them). **The roadmap is the plan of record now** — a scored
+M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
+binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
+text prompts, batch prompt → predictions) and the rotated-box/line/point half
+of M5.** 682 tests pass, including 30 browser tests (install playwright).
+
+AI tools live in `tools/` as the separate `easyannotate-tools` distribution,
+installed into `~/.datafactory/tools` (`easyannotate tools install --source .`
+from a checkout). Tests set `DATAFACTORY_TOOLS_HOME` to an empty dir so they
+never start the real sidecar. Verified only via a CLI smoke on bus.jpg, **not
+yet clicked through in the editor with the real models**, and the true cold
+start (CLIP's 338 MB first download) was never observed end to end. **The roadmap is the plan of record now** — a scored
 path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
 
 Commits carry the owner's name only: never a Claude co-author line.
@@ -56,8 +64,10 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **PyPI publish** and **making the repo public** — the owner's calls, not
-  yet made. The wheel (`uv build`) installs into a clean venv and runs; the
+- **CI (`ci.yml`) and releases (`release.yml`) have never run** — written,
+  first execution is the first push. Expect fixes.
+- **PyPI publish** (both `easyannotate` and `easyannotate-tools`) and
+  **making the repo public** — the owner's calls, not yet made. The wheel (`uv build`) installs into a clean venv and runs; the
   PyInstaller binary (`pyinstaller packaging/easyannotate.spec`) boots and
   serves the editor. Docker is CI-tested but has not run on this machine.
   Rule unchanged: **test these by running them, not by reading them.**
@@ -93,7 +103,7 @@ index, retiring keeps the slot, new classes append. It used to be
 easyannotate demo                 # sample project in the browser
 easyannotate serve                # http://localhost:8765
 easyannotate annotate <folder>    # edit a folder's labels in place
-python -m pytest                  # 665; 27 browser tests skip without playwright
+python -m pytest                  # 682; 30 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3

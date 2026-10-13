@@ -4,7 +4,9 @@
 #   git tag v0.4.0 && git push --tags
 #
 # Publishing to PyPI is deliberately a separate, manual step: `uv publish`
-# from the dist/ artifact, by the owner, once. A release that goes to PyPI
+# from the dist/ artifact, by the owner, once. That artifact holds both
+# easyannotate and easyannotate-tools -- publish both, or `tools install`
+# has nothing to fetch. A release that goes to PyPI
 # automatically on every tag is one typo away from an unwanted version.
 #
 # The desktop bundles are unsigned here. Windows SmartScreen and macOS
@@ -29,6 +31,9 @@ jobs:
         with:
           python-version: "3.12"
       - run: uv build
+      # The AI tools ship as their own distribution, versioned with the editor;
+      # `easyannotate tools install` fetches it from PyPI once both are up.
+      - run: uv build --directory tools --out-dir ../dist
       - uses: actions/upload-artifact@v4
         with:
           name: wheel
