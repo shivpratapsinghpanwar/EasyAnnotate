@@ -109,6 +109,14 @@ class Editor {
     this.assistPanel = new AssistPanel(document.getElementById("tools"), {
       onArm: (tool) => {
         this.armedTool = tool;
+        // Encode-ahead starts the first time a tool that wants it is armed,
+        // and from then on follows every image opened. Not before: encoding
+        // costs seconds of CPU per image, which nobody drawing plain boxes
+        // should pay for.
+        if (tool && (tool.requires || []).includes("prepare")) {
+          this.encodeTool = tool;
+          this.prepareAhead();
+        }
         if (!tool) this.say("");
         else if (this.assistPanel.wantsPoints(tool)) this.say(`${tool.title}: click the object`);
         else this.say(`${tool.title}: drag a box around the object`);
@@ -240,10 +248,26 @@ class Editor {
         : "that image could not be loaded — its shapes are still editable",
     );
 
+    this.prepareAhead();
+
     // Warm both neighbours: N is the common case, E the second most common.
     for (const neighbour of [payload.next, payload.previous]) {
       if (neighbour) this.pixels(neighbour);
     }
+  }
+
+  // Ask the sidecar to encode the open image, so the first click is fast.
+  // Debounced: holding N must not send a prepare per image flown past.
+  prepareAhead() {
+    if (!this.encodeTool || !this.image) return;
+    clearTimeout(this.prepareTimer);
+    const imageId = this.image.id;
+    const name = this.encodeTool.name;
+    this.prepareTimer = setTimeout(() => {
+      if (this.image && this.image.id === imageId) {
+        this.api.prepareTool(this.projectId, name, imageId).catch(() => {});
+      }
+    }, 250);
   }
 
   // Decoded pixels by image id, least recently used first. Kept small on
@@ -1228,7 +1252,8 @@ class Editor {
         `accepted ${result.confirmed} prediction(s)` +
           (hidden.length ? `, rejected ${hidden.length}` : "")
       );
-      if (result.next) await this.openImage(result.next);
+      if (this.strip.isQueue) await this.step(1);
+      else if (result.next) await this.openImage(result.next);
       else this.say("that was the last image");
     } catch (error) {
       this.say(describe(error));
@@ -1452,6 +1477,25 @@ class Editor {
 
   async step(direction) {
     if (!this.image) return;
+    // With a queue chosen in the strip -- "predicted, least sure first" --
+    // N and E walk that queue, not the folder. Reviewing hardest first only
+    // works if moving on goes to the next hardest.
+    if (this.strip.isQueue) {
+      await this.flushSave();
+      let target = null;
+      try {
+        target = await this.strip.neighbour(this.image.id, direction);
+      } catch (error) {
+        this.say(describe(error));
+        return;
+      }
+      if (!target) {
+        this.say(direction > 0 ? "that was the last one in this list" : "that was the first one in this list");
+        return;
+      }
+      await this.openImage(target);
+      return;
+    }
     const target = direction > 0 ? this.image.next : this.image.previous;
     if (!target) {
       this.say(direction > 0 ? "that was the last image" : "that was the first image");

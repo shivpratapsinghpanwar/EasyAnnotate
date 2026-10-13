@@ -59,11 +59,19 @@ class _Result:
         self.boxes = _Boxes(boxes) if boxes is not None else None
 
 
-class FakeSAM:
-    def __init__(self, weights):
-        self.weights = weights
+class FakePredictor:
+    """Ultralytics' SAM predictor: encode once with set_image, then prompt."""
 
-    def predict(self, source, **kwargs):
+    def __init__(self):
+        self.image = None
+        self.encodes = 0
+
+    def set_image(self, image):
+        self.image = image
+        self.encodes += 1
+
+    def __call__(self, **kwargs):
+        assert self.image is not None, "prompted before any image was encoded"
         mask = np.zeros((90, 120), dtype=np.uint8)
         if "bboxes" in kwargs:
             x1, y1, x2, y2 = (int(v) for v in kwargs["bboxes"][0])
@@ -72,6 +80,20 @@ class FakeSAM:
             px, py = (int(v) for v in kwargs["points"][0])
             mask[max(0, py - 10) : py + 10, max(0, px - 10) : px + 10] = 1
         return [_Result(masks=[mask])]
+
+
+class FakeSAM:
+    def __init__(self, weights):
+        self.weights = weights
+        self.predictor = None
+        self.full_predicts = 0
+
+    def predict(self, source, **kwargs):
+        # The real thing builds a fresh predictor state here -- which is why
+        # the sidecar may call it only once, to warm up.
+        self.full_predicts += 1
+        self.predictor = FakePredictor()
+        return [_Result(masks=[np.zeros((64, 64), dtype=np.uint8)])]
 
 
 class FakeWorld:
@@ -183,3 +205,50 @@ def test_a_model_that_fails_to_load_reports_it(monkeypatch, image):
         tool.invoke(params)
     assert "no CUDA" in str(caught.value)
     assert tool.health({"tool": "sam.box"})["state"] == "unavailable"
+
+
+# ------------------------------------------------------------- encode-ahead
+
+
+def test_one_encode_serves_every_prompt_on_an_image(fake_ultralytics, image, tmp_path):
+    """SAM costs ~2.5s per encode and ~0.15s per prompt on a CPU. Encoding the
+    open image once, ahead of the first click, is the whole speed-up."""
+    tool = sidecar.SidecarTool()
+    tool.prepare({"tool": "sam.box", "source": str(image)})
+    _ready(tool, tool.sam)
+    for _ in range(50):
+        if tool._sam_key is not None:
+            break
+        time.sleep(0.02)
+    predictor = tool.sam.model.predictor
+    assert predictor.encodes == 1
+
+    base = {"image_path": str(image), "width": 120, "height": 90}
+    tool.invoke({**base, "tool": "sam.box", "box": [20, 20, 70, 60]})
+    tool.invoke({**base, "tool": "sam.point", "points": [[60, 45]]})
+    tool.invoke({**base, "tool": "sam.box", "box": [5, 5, 40, 30]})
+    assert predictor.encodes == 1, "a prompt re-encoded an image that was already encoded"
+    assert tool.sam.model.full_predicts == 1, "a full predict would wipe the cached features"
+
+    other = make_image(tmp_path / "b.jpg", 2, size=(120, 90))
+    tool.invoke({"image_path": str(other), "width": 120, "height": 90, "tool": "sam.box", "box": [1, 1, 30, 30]})
+    assert predictor.encodes == 2 and predictor.image == str(other)
+
+
+def test_a_superseded_prepare_does_no_work(fake_ultralytics, image, tmp_path):
+    """Holding N fires a prepare per image; only the newest is worth encoding."""
+    tool = sidecar.SidecarTool()
+    with pytest.raises(ToolNotReady):
+        tool.sam.get()
+    _ready(tool, tool.sam)
+    stale = sidecar._image_key(image)
+    tool._want_key = "a-newer-image"
+    tool._encode_when_ready(image, stale)
+    assert tool.sam.model.predictor.encodes == 0
+    assert tool._sam_key is None
+
+
+def test_the_sidecar_keeps_its_weights_in_one_place(monkeypatch, tmp_path):
+    monkeypatch.setenv("EASYANNOTATE_MODELS", str(tmp_path / "models"))
+    assert sidecar.models_dir() == tmp_path / "models"
+    assert (tmp_path / "models").is_dir()

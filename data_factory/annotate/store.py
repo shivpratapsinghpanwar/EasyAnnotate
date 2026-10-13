@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a rung is added to ``MIGRATIONS``.
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 
 #: The version-1 DDL lives beside this module rather than in a string, so it can
 #: be read, diffed and run through a SQLite client directly.
@@ -223,8 +223,22 @@ def _to_v4(conn: sqlite3.Connection, target: int) -> None:
     _step(conn, target, "ALTER TABLE shape ADD COLUMN kind TEXT NOT NULL DEFAULT ''")
 
 
+def _to_v5(conn: sqlite3.Connection, target: int) -> None:
+    """How likely an image's predictions are to be wrong, for review order.
+
+    Kept on the row, not computed per request, because ordering 20,000
+    images by it has to be an index scan, not 20,000 shape listings.
+    """
+    _step(
+        conn,
+        target,
+        "ALTER TABLE image ADD COLUMN uncertainty REAL NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS image_uncertain ON image(project_id, state, uncertainty DESC, seq)",
+    )
+
+
 #: Rung *n* migrates a database at version *n* to version *n+1*.
-MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4]
+MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4, _to_v5]
 
 
 def open_store(root: Path | str) -> Store:

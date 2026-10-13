@@ -163,6 +163,36 @@ def _invoke_patiently(name: str, payload: dict[str, Any], *, attempts: int = 40)
     return None
 
 
+class PrepareIn(BaseModel):
+    image_id: str
+
+
+@router.post("/projects/{project_id}/tools/{name}/prepare")
+def prepare_tool(
+    project_id: str,
+    name: str,
+    body: PrepareIn,
+    store: Store = Depends(get_store),
+    owner: str = Depends(principal),
+) -> dict[str, Any]:
+    """Warm a tool for the image that is open: encode-ahead.
+
+    Best-effort by contract and always quick -- the editor fires this on
+    every navigation once a SAM tool is in use, and a failure here must
+    never be something the person sees.
+    """
+    try:
+        project = projects_mod.get(store, project_id, owner)
+        image = images_mod.get(store, project, body.image_id)
+    except StoreError as exc:
+        raise HTTPException(404, str(exc)) from None
+    root = Path(project.root) if project.is_attached and project.root else media_root(project.id)
+    path = resolve_media(root, image.rel_path)
+    if path.is_file():
+        REGISTRY.prepare(name, image.id, path)
+    return {"ok": True}
+
+
 @router.get("/tools")
 def list_tools() -> dict[str, Any]:
     """Every usable tool. An empty list is the normal, healthy default."""

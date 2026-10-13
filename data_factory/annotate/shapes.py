@@ -309,7 +309,51 @@ def save(
 
     image.version = result.version
     image.state = state
+    refresh_uncertainty(store, project, image)
     return result
+
+
+#: Two predictions of different classes overlapping this much are the model
+#: arguing with itself about what the object is.
+CONFLICT_IOU = 0.7
+
+
+def uncertainty_of(stored: list[StoredShape]) -> float:
+    """How much review an image's predictions need. Higher: look sooner.
+
+    Only untouched model shapes count -- what a person drew or corrected is
+    settled. Each scores its ambiguity, 1 at confidence 0.5 falling to 0 at
+    0 or 1, so a wall of 0.95s is quick work and a handful of 0.5s is not.
+    Every pair of overlapping predictions with different classes adds 1:
+    class confusion is the commonest systematic error and the most
+    expensive one to train on.
+    """
+    live = [s for s in stored if s.is_model and not s.is_touched]
+    score = 0.0
+    for s in live:
+        if s.shape.confidence is not None:
+            score += 1.0 - abs(2.0 * float(s.shape.confidence) - 1.0)
+    for i, a in enumerate(live):
+        for b in live[i + 1:]:
+            if a.label_idx != b.label_idx and _iou(a.shape.bbox, b.shape.bbox) > CONFLICT_IOU:
+                score += 1.0
+    return round(score, 4)
+
+
+def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
+    ix = max(0, min(a[2], b[2]) - max(a[0], b[0]))
+    iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+    inter = ix * iy
+    union = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / union if union > 0 else 0.0
+
+
+def refresh_uncertainty(store: Store, project: Project, image: Image) -> float:
+    score = uncertainty_of(listing(store, project, image))
+    with store.write() as conn:
+        conn.execute("UPDATE image SET uncertainty = ? WHERE id = ?", (score, image.id))
+    image.uncertainty = score
+    return score
 
 
 def _keeps_class(before: StoredShape | None, shape: Shape) -> bool:

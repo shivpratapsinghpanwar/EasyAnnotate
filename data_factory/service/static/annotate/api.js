@@ -110,8 +110,9 @@ export class Api {
     return this.post("/api/projects", { name });
   }
 
-  images(id, { state = "", limit = 500, offset = 0, locate = "" } = {}) {
+  images(id, { state = "", order = "", limit = 500, offset = 0, locate = "" } = {}) {
     const query = new URLSearchParams({ state, limit, offset });
+    if (order) query.set("order", order);
     if (locate) query.set("locate", locate);
     return this.get(`/api/projects/${id}/images?${query}`);
   }
@@ -157,6 +158,10 @@ export class Api {
 
   summary(projectId) {
     return this.get(`/api/projects/${projectId}/summary`);
+  }
+
+  prepareTool(projectId, name, imageId) {
+    return this.post(`/api/projects/${projectId}/tools/${name}/prepare`, { image_id: imageId });
   }
 
   runToolBatch(projectId, name, options) {

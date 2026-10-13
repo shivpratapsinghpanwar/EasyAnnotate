@@ -48,6 +48,7 @@ class Image:
     version: int
     created_at: float
     updated_at: float
+    uncertainty: float = 0.0
 
     @property
     def name(self) -> str:
@@ -67,7 +68,19 @@ class Image:
             "seq": self.seq,
             "state": self.state,
             "version": self.version,
+            "uncertainty": round(self.uncertainty, 3),
         }
+
+
+#: Ways a listing can be ordered. "uncertain" puts the predictions most likely
+#: to be wrong first -- review time spent where the model needs it.
+ORDERS = ("", "uncertain")
+
+
+def _order_by(order: str) -> str:
+    if order not in ORDERS:
+        raise StoreError(f"order must be one of: {', '.join(o or '(file order)' for o in ORDERS)}")
+    return " ORDER BY uncertainty DESC, seq" if order == "uncertain" else " ORDER BY seq"
 
 
 def _row(row: Any) -> Image:
@@ -82,6 +95,7 @@ def _row(row: Any) -> Image:
         version=row["version"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        uncertainty=float(row["uncertainty"]) if "uncertainty" in row.keys() else 0.0,
     )
 
 
@@ -316,13 +330,14 @@ def listing(
     state: str = "",
     limit: int = 500,
     offset: int = 0,
+    order: str = "",
 ) -> list[Image]:
     sql = "SELECT * FROM image WHERE project_id = ?"
     params: list[Any] = [project.id]
     if state:
         sql += " AND state = ?"
         params.append(_check_state(state))
-    sql += " ORDER BY seq LIMIT ? OFFSET ?"
+    sql += _order_by(order) + " LIMIT ? OFFSET ?"
     params.extend([max(1, min(int(limit), 5000)), max(0, int(offset))])
     return [_row(r) for r in store.query(sql, tuple(params))]
 
@@ -386,19 +401,30 @@ def set_size(store: Store, project: Project, image: Image, width: int, height: i
     return image
 
 
-def position(store: Store, project: Project, image_id: str, *, state: str = "") -> int | None:
+def position(
+    store: Store, project: Project, image_id: str, *, state: str = "", order: str = ""
+) -> int | None:
     """Where an image sits in the listing for ``state`` (all, if empty).
 
     What lets the filmstrip scroll to the open image in a 20,000-image project
     without fetching the 19,000 rows before it. ``None`` when the image is not
     in that listing -- open, but filtered out.
     """
-    sql = "SELECT seq, state FROM image WHERE project_id = ? AND id = ?"
+    _order_by(order)  # validates
+    sql = "SELECT seq, state, uncertainty FROM image WHERE project_id = ? AND id = ?"
     row = store.one(sql, (project.id, image_id))
     if row is None or (state and row["state"] != _check_state(state)):
         return None
-    count_sql = "SELECT COUNT(*) AS n FROM image WHERE project_id = ? AND seq < ?"
-    params: list[Any] = [project.id, int(row["seq"])]
+    if order == "uncertain":
+        count_sql = (
+            "SELECT COUNT(*) AS n FROM image WHERE project_id = ?"
+            " AND (uncertainty > ? OR (uncertainty = ? AND seq < ?))"
+        )
+        u = float(row["uncertainty"])
+        params: list[Any] = [project.id, u, u, int(row["seq"])]
+    else:
+        count_sql = "SELECT COUNT(*) AS n FROM image WHERE project_id = ? AND seq < ?"
+        params = [project.id, int(row["seq"])]
     if state:
         count_sql += " AND state = ?"
         params.append(state)

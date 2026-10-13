@@ -36,7 +36,10 @@ export class Filmstrip {
     this.thumbUrl = thumbUrl;
     this.fetchPage = fetchPage;
 
+    // The filter box holds "state" or "state:order". Kept apart here because
+    // counts are per state, while the order only changes what comes first.
     this.filter = "";
+    this.order = "";
     this.total = 0;
     this.lastCounts = null;
     this.pages = new Map(); // page number -> images[] (or a pending promise)
@@ -78,8 +81,10 @@ export class Filmstrip {
     this.draw();
   }
 
-  setFilter(state) {
+  setFilter(value) {
+    const [state, order] = String(value || "").split(":");
     this.filter = state || "";
+    this.order = order || "";
     this.list.scrollTop = 0;
     this.reset(this.lastCounts);
     if (this.currentId) this.reveal(this.currentId);
@@ -93,7 +98,7 @@ export class Filmstrip {
   ensurePage(number) {
     if (this.pages.has(number) || number * PAGE >= this.total) return;
     const generation = this.generation;
-    const pending = this.fetchPage({ state: this.filter, offset: number * PAGE, limit: PAGE })
+    const pending = this.fetchPage({ state: this.filter, order: this.order, offset: number * PAGE, limit: PAGE })
       .then((payload) => {
         // A filter change or reset while this was in flight makes it stale.
         if (generation !== this.generation) return;
@@ -200,13 +205,17 @@ export class Filmstrip {
       if (!Array.isArray(page)) continue;
       const at = page.findIndex((image) => image.id === imageId);
       if (at >= 0) {
+        this.lastPosition = number * PAGE + at;
         this.scrollToIndex(number * PAGE + at);
         return;
       }
     }
     try {
-      const payload = await this.fetchPage({ state: this.filter, offset: 0, limit: 1, locate: imageId });
-      if (payload.position != null && imageId === this.currentId) this.scrollToIndex(payload.position);
+      const payload = await this.fetchPage({ state: this.filter, order: this.order, offset: 0, limit: 1, locate: imageId });
+      if (payload.position != null && imageId === this.currentId) {
+        this.lastPosition = payload.position;
+        this.scrollToIndex(payload.position);
+      }
     } catch {
       // Not knowing where it is only costs the scroll.
     }
@@ -219,6 +228,30 @@ export class Filmstrip {
       this.list.scrollTop = Math.max(0, top - view / 2 + ROW_HEIGHT / 2);
     }
     this.draw();
+  }
+
+  // Whether navigation should follow this list rather than file order: any
+  // filter or ordering means the person chose a queue to work through.
+  get isQueue() {
+    return Boolean(this.filter || this.order);
+  }
+
+  // The image beside `imageId` in this queue. When the current image has
+  // just left it -- accepted, so no longer "predicted" -- the one that slid
+  // into its place is next, so `lastPosition` remembers where it was.
+  async neighbour(imageId, direction) {
+    const query = { state: this.filter, order: this.order };
+    const located = await this.fetchPage({ ...query, offset: 0, limit: 1, locate: imageId });
+    let offset;
+    if (located.position != null) {
+      this.lastPosition = located.position;
+      offset = located.position + direction;
+    } else {
+      offset = (this.lastPosition ?? 0) + (direction > 0 ? 0 : -1);
+    }
+    if (offset < 0) return null;
+    const page = await this.fetchPage({ ...query, offset, limit: 1 });
+    return page.images && page.images.length ? page.images[0].id : null;
   }
 
   setState(imageId, state) {

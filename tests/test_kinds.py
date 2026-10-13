@@ -11,6 +11,7 @@ import pytest
 
 from conftest import make_image
 from data_factory.annotate import images, projects, shapes
+from data_factory.annotate import store as store_mod
 from data_factory.annotate.store import Store
 from data_factory.core.annotations import coco, csvfmt, dota, formats, labelme, yolo
 from data_factory.core.annotations.model import Annotation, AnnotationError, Shape
@@ -126,7 +127,7 @@ def test_dota_round_trips_through_the_dataset_layer(tmp_path):
 def test_the_store_keeps_kinds(tmp_path):
     store = Store(tmp_path / "annotations.db")
     try:
-        assert store.one("PRAGMA user_version")[0] == 4
+        assert store.one("PRAGMA user_version")[0] == store_mod.SCHEMA_VERSION
         project = projects.create(store, "Kinds")
         image = images.add(store, project, "a.jpg", width=120, height=90)
         shapes.save(store, project, image, [(None, POINT), (None, LINE), (None, OBB), (None, BOX)])

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import threading
 import time
 from pathlib import Path
@@ -47,7 +48,7 @@ SPECS = [
             "required": ["box"],
         },
         version="sam2.1-tiny",
-        requires=(),
+        requires=("prepare",),
     ),
     ToolSpec(
         name="sam.point",
@@ -60,7 +61,7 @@ SPECS = [
             "required": ["points"],
         },
         version="sam2.1-tiny",
-        requires=(),
+        requires=("prepare",),
     ),
     ToolSpec(
         name="detect.text",
@@ -130,9 +131,16 @@ def _device() -> str:
 
 
 def _load_sam() -> Any:
+    import numpy as np
     from ultralytics import SAM
 
-    return SAM(SAM_WEIGHTS)
+    model = SAM(SAM_WEIGHTS)
+    # Build the predictor once, on a tiny dummy image. After this the sidecar
+    # only ever uses predictor.set_image + prompt calls: a full model.predict
+    # on anything replaces the cached image features (measured: the next
+    # prompt then returns an empty mask), so it must never run again.
+    model.predict(np.zeros((64, 64, 3), np.uint8), bboxes=[[2, 2, 30, 30]], verbose=False)
+    return model
 
 
 def _load_world() -> Any:
@@ -170,6 +178,13 @@ class SidecarTool:
         self._pending_lock = threading.Lock()
         # Models are not thread-safe; one inference at a time.
         self._model_lock = threading.Lock()
+        # Encode-ahead. SAM spends ~2.5s on CPU encoding an image and ~0.15s
+        # answering each prompt against it, so the image the person has open
+        # is encoded once, ahead of the first click. One image only: the
+        # features live inside Ultralytics' predictor, and snapshotting them
+        # across versions would be brittle.
+        self._sam_key: str | None = None
+        self._want_key: str | None = None
 
     # -- protocol ----------------------------------------------------------
 
@@ -185,13 +200,49 @@ class SidecarTool:
         }
 
     def prepare(self, params: dict[str, Any]) -> None:
-        # Start loading the model the moment an image is opened, so the first
-        # click pays for the image, not for the weights.
+        """Start loading the model and, for SAM, encoding this image. Returns
+        at once: the work happens on a thread, and only the newest request
+        is worth finishing -- holding N must not queue up a backlog of
+        encodes for images already left behind."""
         name = str(params.get("tool") or "")
+        lazy = self.world if name.startswith("detect") else self.sam
         try:
-            (self.world if name.startswith("detect") else self.sam).get()
+            lazy.get()
         except ToolNotReady:
             pass
+        except ToolError:
+            return
+        if not name.startswith("sam"):
+            return
+        source = params.get("source") or params.get("image_path")
+        if not source or not Path(str(source)).is_file():
+            return
+        path = Path(str(source))
+        key = _image_key(path)
+        self._want_key = key
+        threading.Thread(target=self._encode_when_ready, args=(path, key), daemon=True,
+                         name="sam-encode").start()
+
+    def _encode_when_ready(self, path: Path, key: str) -> None:
+        deadline = time.time() + 600  # first use downloads the weights
+        while time.time() < deadline:
+            if self._want_key != key:
+                return  # the person moved on; a newer prepare owns the work
+            try:
+                self.sam.get()
+                break
+            except ToolNotReady:
+                time.sleep(0.5)
+            except ToolError:
+                return
+        with self._model_lock:
+            if self._want_key != key or self._sam_key == key:
+                return
+            try:
+                self.sam.model.predictor.set_image(str(path))
+                self._sam_key = key
+            except Exception:
+                self._sam_key = None
 
     def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
         name = str(params.get("tool") or "")
@@ -257,7 +308,14 @@ class SidecarTool:
 
     def _sam(self, path: Path, params: dict[str, Any], **prompt: Any) -> list[dict[str, Any]]:
         model = self.sam.get()
-        results = model.predict(str(path), device=_device(), verbose=False, **prompt)
+        predictor = model.predictor
+        key = _image_key(path)
+        if self._sam_key != key:
+            # Not encoded ahead (no prepare, or a different image): encode now.
+            self._sam_key = None
+            predictor.set_image(str(path))
+            self._sam_key = key
+        results = predictor(**prompt)
         width, height = int(params.get("width") or 0), int(params.get("height") or 0)
         shapes: list[dict[str, Any]] = []
         for result in results:
@@ -305,6 +363,23 @@ class SidecarTool:
         return shapes
 
 
+def _image_key(path: Path) -> str:
+    try:
+        stamp = path.stat().st_mtime_ns
+    except OSError:
+        stamp = 0
+    return f"{path}|{stamp}"
+
+
+def models_dir() -> Path:
+    """Where weights live. Ultralytics downloads into the working directory,
+    so the sidecar runs from here -- otherwise every place it happened to be
+    started from collected another 100 MB of .pt files."""
+    path = Path(os.environ.get("EASYANNOTATE_MODELS") or Path.home() / ".datafactory" / "models")
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def _request_key(name: str, path: Path, params: dict[str, Any]) -> str:
     """The same request, asked again, is the same work: the retry that follows
     a not_ready must find what the first call started."""
@@ -328,6 +403,7 @@ def _image_path(params: dict[str, Any]) -> Path:
 
 
 def main() -> int:
+    os.chdir(models_dir())
     return serve(SidecarTool())
 
 

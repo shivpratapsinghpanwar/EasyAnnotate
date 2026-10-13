@@ -1083,3 +1083,43 @@ def test_typing_a_class_fills_the_review_queue(browser, service_with_tools, bare
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------- review hardest first, end to end
+
+
+def test_accepting_walks_the_least_sure_first_queue(browser, service, bare_images):
+    """'predicted, least sure first' orders the strip by uncertainty, and A
+    moves to the next hardest image -- not the next file."""
+    from data_factory.annotate import images as images_mod
+    from data_factory.annotate import labels as labels_mod
+    from data_factory.annotate import projects as projects_mod
+    from data_factory.annotate import review
+    from data_factory.core.annotations.model import Shape
+    from data_factory.service.deps import get_store
+
+    made = make_project(service, bare_images, "queue")
+    store_ = get_store()
+    project = projects_mod.get(store_, made["id"], "local")
+    labels_mod.adopt(store_, project, ["door"])
+    for name, conf in (("p0.jpg", 0.97), ("p1.jpg", 0.6), ("p2.jpg", 0.5)):
+        image = images_mod.by_path(store_, project, name)
+        review.set_predictions(store_, project, image, [Shape(label="door", bbox=(50, 50, 300, 400), confidence=conf)])
+
+    errors: list[str] = []
+    page = open_editor(browser, service, made["id"], errors)
+    try:
+        page.select_option("[data-role=strip-filter]", "predicted:uncertain")
+        page.wait_for_function(
+            "[...document.querySelectorAll('.strip-item [data-role=strip-name]')].map(n => n.textContent).join() === 'p2.jpg,p1.jpg,p0.jpg'",
+            timeout=10_000,
+        )
+        page.locator(".strip-item").first.click()
+        page.wait_for_function("window.__editor.image.name === 'p2.jpg'")
+        page.keyboard.press("a")
+        page.wait_for_function("window.__editor.image.name === 'p1.jpg'", timeout=10_000)
+        page.keyboard.press("a")
+        page.wait_for_function("window.__editor.image.name === 'p0.jpg'", timeout=10_000)
+    finally:
+        page.close()
+    assert not errors, errors
