@@ -47,7 +47,11 @@ DEFAULT_TIMEOUTS = {
     "describe": 5.0,
     "health": 5.0,
     "prepare": 30.0,
-    "invoke": 15.0,
+    # A tool replies promptly or says not_ready -- except that a native model
+    # load (torch.jit.load of CLIP's 338 MB) can hold the GIL for tens of
+    # seconds and delay even that reply. Timing out kills and restarts the
+    # sidecar, which would throw the loaded models away, so this is generous.
+    "invoke": 45.0,
 }
 
 

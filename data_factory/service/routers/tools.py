@@ -27,6 +27,7 @@ from pydantic import BaseModel, Field
 from ...annotate import images as images_mod
 from ...annotate import labels as labels_mod
 from ...annotate import projects as projects_mod
+from ...annotate import shapes as shapes_mod
 from ...annotate.store import Store, StoreError
 from ...annotate.tools import postprocess
 from ...annotate.tools.protocol import ToolError, ToolNotReady, ToolUnavailable
@@ -43,6 +44,123 @@ class InvokeIn(BaseModel):
     #: whole point of a declared spec is that a new tool needs no server change.
     params: dict[str, Any] = Field(default_factory=dict)
     label: str = ""
+
+
+class BatchIn(BaseModel):
+    #: The tool's own inputs -- for a prompt tool, the text.
+    params: dict[str, Any] = Field(default_factory=dict)
+    label: str = ""
+    #: Which images to run over. Reviewed images are never touched here:
+    #: a person's finished work is not something a model gets to redo.
+    states: list[str] = Field(default_factory=lambda: ["todo"])
+    limit: int = 2000
+
+
+@router.post("/projects/{project_id}/tools/{name}/batch")
+def invoke_tool_batch(
+    project_id: str,
+    name: str,
+    body: BatchIn,
+    store: Store = Depends(get_store),
+    owner: str = Depends(principal),
+) -> dict[str, Any]:
+    """Run a tool over many images as a job; its answers become predictions.
+
+    This is "type a class name, get every instance to review": each image's
+    results go through review.set_predictions, so they arrive dashed, with
+    confidence, counted by the agreement metric, and never exported until
+    somebody has looked at them. The same path a model run imported from a
+    file takes -- a tool is just a model run that happens here.
+    """
+    import secrets
+
+    from ...annotate import review
+    from ...core.types import OpResult
+    from ..deps import jobs_manager
+
+    try:
+        project = projects_mod.get(store, project_id, owner)
+    except StoreError as exc:
+        raise HTTPException(404, str(exc)) from None
+    jobs = jobs_manager()
+    if jobs is None:
+        raise HTTPException(503, "no job runner in this process")
+    wanted = [s for s in body.states if s in images_mod.STATES and s != "reviewed"]
+    if not wanted:
+        raise HTTPException(
+            400, "states must name unreviewed states: todo, predicted, in_progress, skipped"
+        )
+    if name not in {spec.name for spec in REGISTRY.available()}:
+        raise HTTPException(404, f"no tool called {name!r} is installed")
+
+    targets: list[Any] = []
+    for state in wanted:
+        targets.extend(images_mod.listing(store, project, state=state, limit=body.limit))
+    targets = targets[: body.limit]
+    root = Path(project.root) if project.is_attached and project.root else media_root(project.id)
+    label = (body.label or "").strip()
+    spec = next(s for s in REGISTRY.available() if s.name == name)
+    needs_prepare = "prepare" in (spec.requires or ())
+
+    def work(context) -> OpResult:
+        result = OpResult(op=f"tool:{name}")
+        predicted = shapes_total = failed = 0
+        for index, image in enumerate(targets):
+            context.check_cancelled()
+            context.emit(index, len(targets), image.name)
+            path = resolve_media(root, image.rel_path)
+            if not path.is_file():
+                failed += 1
+                continue
+            payload = {
+                **body.params,
+                "image_id": image.id,
+                "image_path": str(path),
+                "width": image.width,
+                "height": image.height,
+            }
+            if needs_prepare:
+                try:
+                    REGISTRY.prepare(name, image.id, path)
+                except Exception:
+                    pass  # the invoke below reports the real problem
+            raw = _invoke_patiently(name, payload)
+            if raw is None:
+                failed += 1
+                continue
+            made = _shapes_from(raw, label, image.width, image.height)
+            review.set_predictions(store, project, image, made)
+            predicted += 1
+            shapes_total += len(made)
+        context.emit(len(targets), len(targets), "done")
+        result.data = {
+            "images": len(targets),
+            "predicted": predicted,
+            "shapes": shapes_total,
+            "failed": failed,
+            "agreement": shapes_mod.agreement(store, project),
+        }
+        if failed:
+            result.warnings.append(f"{failed} image(s) could not be processed")
+        return result
+
+    job = jobs.submit(secrets.token_hex(8), f"tool:{name}", project.id, work)
+    return job.as_dict()
+
+
+def _invoke_patiently(name: str, payload: dict[str, Any], *, attempts: int = 40) -> Any:
+    """A tool still loading its weights says not_ready; wait for it. Anything
+    else wrong with one image is that image's problem, not the job's."""
+    import time
+
+    for _ in range(attempts):
+        try:
+            return REGISTRY.invoke(name, payload)
+        except ToolNotReady as exc:
+            time.sleep(max(0.2, getattr(exc, "retry_after_ms", 500) / 1000.0))
+        except Exception:
+            return None
+    return None
 
 
 @router.get("/tools")

@@ -120,6 +120,22 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--no-browser", action="store_true", help="do not open a browser")
     demo.set_defaults(_handler=_cmd_demo)
 
+    tools = subparsers.add_parser(
+        "tools", help="model-backed helpers: SAM outlines and text-prompted detection"
+    )
+    tools.set_defaults(_handler=_cmd_tools_help)
+    tools_sub = tools.add_subparsers(dest="tools_command")
+    install = tools_sub.add_parser(
+        "install", help="make ~/.datafactory/tools and install easyannotate-tools into it"
+    )
+    install.add_argument("--gpu", action="store_true", help="install the CUDA build of PyTorch")
+    install.add_argument(
+        "--source", help="install from this checkout instead of PyPI (for developers)"
+    )
+    install.set_defaults(_handler=_cmd_tools_install)
+    status = tools_sub.add_parser("status", help="what the editor will find")
+    status.set_defaults(_handler=_cmd_tools_status)
+
     desktop = subparsers.add_parser(
         "app", help="open EasyAnnotate in its own window (falls back to the browser)"
     )
@@ -356,6 +372,68 @@ def _serve_editor(project_id: str, args: argparse.Namespace, out: TextIO) -> int
         port=args.port,
         log_level="warning",
     )
+    return 0
+
+
+def _cmd_tools_help(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    out.write("usage: easyannotate tools install [--gpu] [--source DIR]\n"
+              "       easyannotate tools status\n")
+    return 2
+
+
+def _cmd_tools_install(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    """A separate environment for the heavy tools, where torch's version
+    matrix is resolved on its own and can never break the editor's install."""
+    import shutil
+    import subprocess
+
+    home = Path.home() / ".datafactory" / "tools"
+    python = home / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
+    uv = shutil.which("uv")
+
+    def run(cmd: list[str]) -> int:
+        out.write("  $ " + " ".join(cmd) + "\n")
+        out.flush()
+        return subprocess.call(cmd)
+
+    if not python.is_file():
+        out.write(f"creating {home}\n")
+        code = run([uv, "venv", str(home)] if uv else [sys.executable, "-m", "venv", str(home)])
+        if code:
+            err.write("could not create the environment\n")
+            return code
+    pip = [uv, "pip", "install", "--python", str(python)] if uv else [str(python), "-m", "pip", "install"]
+
+    if args.gpu:
+        out.write("installing PyTorch with CUDA (large download)\n")
+        code = run(pip + ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"])
+        if code:
+            return code
+    packages = (
+        ["-e", str(Path(args.source)), "-e", str(Path(args.source) / "tools")]
+        if args.source
+        else ["easyannotate-tools"]
+    )
+    out.write("installing easyannotate-tools (PyTorch and Ultralytics; several hundred MB)\n")
+    code = run(pip + packages)
+    if code:
+        return code
+    out.write(f"\ninstalled into {home}. Model weights download on first use.\n")
+    return _cmd_tools_status(args, out, err)
+
+
+def _cmd_tools_status(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from ..annotate.tools.registry import REGISTRY
+
+    report = REGISTRY.as_dict()
+    tools = report.get("tools") or []
+    if not tools:
+        health = report.get("health") or {}
+        out.write(f"no tools: {report.get('reason') or health.get('detail') or 'none found'}\n")
+        return 1
+    for tool in tools:
+        out.write(f"  {tool['name']:<14} {tool.get('title', '')}  [{tool.get('version', '')}]\n")
+    REGISTRY.close()
     return 0
 
 

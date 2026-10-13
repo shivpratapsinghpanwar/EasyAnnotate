@@ -20,6 +20,15 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
 - Trackpad: two fingers pan, pinch zooms.
 - Next and previous images are decoded ahead of time, off the main thread.
 
+### AI assist
+- `easyannotate tools install` sets up a separate environment with PyTorch
+  and Ultralytics; the editor discovers it with no configuration.
+- SAM 2.1 outlines from a dragged box or a click; YOLO-World finds every
+  instance of a typed class on one image or, as a job, on every unreviewed
+  image -- the results land in the review queue as predictions.
+- A tool still loading or still computing answers "not ready" and keeps
+  working; the editor retries quietly. CPU-only machines work.
+
 ### Annotation types
 - Points (`K`, one click), lines (`L`, click points, Enter) and rotated
   boxes (`O`: drag, then turn by the handle or `[` `]`), alongside boxes and

@@ -16,11 +16,13 @@
 // working annotator.
 
 export class AssistPanel {
-  constructor(root, { onArm }) {
+  constructor(root, { onArm, onPrompt }) {
     this.root = root;
     this.list = root.querySelector('[data-role="tool-list"]');
     this.template = root.querySelector('[data-role="tool-item"]');
+    this.promptTemplate = root.querySelector('[data-role="prompt-item"]');
     this.onArm = onArm;
+    this.onPrompt = onPrompt || (() => {});
     this.tools = [];
     this.armed = null;
   }
@@ -31,6 +33,10 @@ export class AssistPanel {
     this.list.replaceChildren();
 
     for (const tool of this.tools) {
+      if (tool.kind === "prompt") {
+        this.list.append(this.promptNode(tool));
+        continue;
+      }
       const node = this.template.content.firstElementChild.cloneNode(true);
       const button = node.querySelector("button");
       button.textContent = tool.title || tool.name;
@@ -39,6 +45,29 @@ export class AssistPanel {
       button.addEventListener("click", () => this.arm(tool));
       this.list.append(node);
     }
+  }
+
+  // A prompt tool takes words, not a gesture: "find every handle". It runs on
+  // this image, or on every unreviewed image as a job -- which is where typing
+  // a class name turns into a review queue instead of a drawing session.
+  promptNode(tool) {
+    const node = this.promptTemplate.content.firstElementChild.cloneNode(true);
+    const text = node.querySelector('[data-role="prompt-text"]');
+    const here = node.querySelector('[data-role="prompt-image"]');
+    const all = node.querySelector('[data-role="prompt-all"]');
+    node.querySelector('[data-role="prompt-title"]').textContent = tool.title || tool.name;
+    text.title = tool.summary || "";
+    text.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        this.onPrompt(tool, text.value.trim(), "image");
+      }
+      if (event.key === "Escape") text.blur();
+      event.stopPropagation();
+    });
+    here.addEventListener("click", () => this.onPrompt(tool, text.value.trim(), "image"));
+    all.addEventListener("click", () => this.onPrompt(tool, text.value.trim(), "all"));
+    return node;
   }
 
   // Arming is a toggle, not a mode you can get stuck in: clicking the armed
@@ -65,5 +94,10 @@ export class AssistPanel {
   wantsBox(tool) {
     const properties = (tool && tool.inputs && tool.inputs.properties) || {};
     return Object.prototype.hasOwnProperty.call(properties, "box");
+  }
+
+  wantsPoints(tool) {
+    const properties = (tool && tool.inputs && tool.inputs.properties) || {};
+    return Object.prototype.hasOwnProperty.call(properties, "points");
   }
 }

@@ -94,7 +94,7 @@ class TestSpecs:
 class TestTheHappyPath:
     def test_describe_returns_the_tools(self, tool: LocalTool):
         specs = tool.describe()
-        assert [s.name for s in specs] == ["fake.box"]
+        assert [s.name for s in specs] == ["fake.box", "fake.text"]
         assert specs[0].kind == "interactive"
 
     def test_health_is_ready(self, tool: LocalTool):
@@ -229,7 +229,7 @@ class TestAbsenceIsNormal:
         monkeypatch.delenv("DATAFACTORY_TOOLS_MODULE", raising=False)
         payload = ToolRegistry().as_dict()
         assert payload["tools"] == []
-        assert "no tools module" in payload["detail"]
+        assert "no tools installed" in payload["detail"]
 
     def test_tools_can_be_switched_off_even_when_installed(self, monkeypatch):
         monkeypatch.setenv("DATAFACTORY_TOOLS_MODULE", "data_factory.annotate.tools.fake")
@@ -253,7 +253,7 @@ class TestAbsenceIsNormal:
         registry = ToolRegistry()
         try:
             payload = registry.as_dict()
-            assert [t["name"] for t in payload["tools"]] == ["fake.box"]
+            assert [t["name"] for t in payload["tools"]] == ["fake.box", "fake.text"]
             assert payload["tools"][0]["health"]["state"] == "ready"
         finally:
             registry.close()

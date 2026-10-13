@@ -163,3 +163,15 @@ def clean_dataset(tmp_path: Path) -> Path:
     make_image(folder / "bg.jpg", 300)
     write_background(folder / "bg.xml")
     return folder
+
+
+@pytest.fixture(autouse=True)
+def _no_real_tools(monkeypatch, tmp_path_factory):
+    """Never discover a developer's real tools environment from a test.
+
+    Discovery is zero-config on purpose -- a venv at ~/.datafactory/tools is
+    enough -- which means a test that lists tools would otherwise start the
+    real sidecar, load PyTorch, and take a minute. Tests that want a sidecar
+    name the fake one explicitly.
+    """
+    monkeypatch.setenv("DATAFACTORY_TOOLS_HOME", str(tmp_path_factory.mktemp("no-tools")))

@@ -175,8 +175,11 @@ class SidecarClient:
                 # reply would arrive against an id nobody is waiting for.
                 # Restarting is the honest recovery.
                 self._kill_child()
+                # The sidecar's own last words are the only clue there is.
+                tail = self._stderr_tail()
                 raise ToolError(
-                    f"{method} took longer than {wait:g}s", code="timeout"
+                    f"{method} took longer than {wait:g}s" + (f" -- sidecar said: {tail}" if tail else ""),
+                    code="timeout",
                 ) from None
             return raise_for(reply)
 
@@ -335,7 +338,10 @@ def python_for_tools() -> str:
     explicit = os.environ.get("DATAFACTORY_TOOLS_PYTHON")
     if explicit:
         return explicit
-    candidate = Path.home() / ".datafactory" / "tools"
+    # DATAFACTORY_TOOLS_HOME moves the conventional environment -- and lets
+    # the test suite point it somewhere empty, so no test ever finds the real
+    # sidecar a developer has installed and spawns PyTorch by accident.
+    candidate = Path(os.environ.get("DATAFACTORY_TOOLS_HOME") or Path.home() / ".datafactory" / "tools")
     binary = candidate / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
     if binary.is_file():
         return str(binary)

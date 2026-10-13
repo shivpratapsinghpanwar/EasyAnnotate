@@ -159,6 +159,10 @@ export class Api {
     return this.get(`/api/projects/${projectId}/summary`);
   }
 
+  runToolBatch(projectId, name, options) {
+    return this.post(`/api/projects/${projectId}/tools/${name}/batch`, options);
+  }
+
   exportProject(projectId, options) {
     return this.post(`/api/projects/${projectId}/export`, options);
   }

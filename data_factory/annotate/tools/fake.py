@@ -39,6 +39,22 @@ SPECS = [
         version="1",
         requires=("prepare",),
     ),
+    # A prompt-kind tool, so the editor's "find every ..." panel and the batch
+    # route can be driven end to end without a model: it answers one box per
+    # image, labelled with whatever was typed.
+    ToolSpec(
+        name="fake.text",
+        title="Fake find every...",
+        summary="Returns one box labelled with the prompt. Exists to test the prompt panel.",
+        kind="prompt",
+        inputs={
+            "type": "object",
+            "properties": {"text": {"type": "string"}},
+            "required": ["text"],
+        },
+        version="1",
+        requires=(),
+    ),
 ]
 
 
@@ -76,6 +92,17 @@ class FakeTool:
             raise SystemExit                  # a BaseException, not an Exception
         if behaviour == "unknown_tool":
             raise ToolError("no such tool", code="unknown_tool")
+
+        if str(params.get("tool") or "") == "fake.text":
+            text = str(params.get("text") or "").strip()
+            if not text:
+                raise ToolError("fake.text needs text")
+            return {
+                "shapes": [
+                    {"label": text.split(",")[0].strip(), "bbox": [5, 5, 40, 30], "polygon": None, "confidence": 0.8}
+                ],
+                "ms": WORK_MS,
+            }
 
         if image_id and image_id not in self.prepared:
             # Exactly how the real SAM tool behaves on a cold image: not an

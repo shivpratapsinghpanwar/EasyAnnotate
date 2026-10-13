@@ -109,8 +109,11 @@ class Editor {
     this.assistPanel = new AssistPanel(document.getElementById("tools"), {
       onArm: (tool) => {
         this.armedTool = tool;
-        this.say(tool ? `${tool.title}: drag a box around the object` : "");
+        if (!tool) this.say("");
+        else if (this.assistPanel.wantsPoints(tool)) this.say(`${tool.title}: click the object`);
+        else this.say(`${tool.title}: drag a box around the object`);
       },
+      onPrompt: (tool, text, scope) => this.runPrompt(tool, text, scope),
     });
     this.armedTool = null;
 
@@ -552,6 +555,11 @@ class Editor {
       // Right-click belongs to the context-menu delete. Letting it through
       // to the tools added a polygon vertex or started a box underneath it.
       if (event.button !== 0) return;
+      // A click-prompted helper (SAM from a point) takes the click itself.
+      if (this.armedTool && this.assistPanel.wantsPoints(this.armedTool)) {
+        this.runTool(this.armedTool, { points: [[Math.round(ix), Math.round(iy)]] });
+        return;
+      }
       // Left-drag with the select tool draws a box: no mode to enter, which
       // is the entire interaction argument of this product. That includes a
       // drag starting on a shape you have not selected -- a handle on a
@@ -621,7 +629,7 @@ class Editor {
           const draft = this.tools.box.draft();
           this.tools.box.cancel();
           this.drawingBox = false;
-          if (draft) this.runTool(this.armedTool, draft.bbox);
+          if (draft) this.runTool(this.armedTool, { box: draft.bbox });
           return;
         }
         this.tools.box.pointerup(event);
@@ -1264,30 +1272,41 @@ class Editor {
 
   // -- heavy tools ---------------------------------------------------------
 
-  async runTool(tool, box) {
+  async runTool(tool, params, { label: labelOverride } = {}) {
     if (!this.image) return;
-    const label = this.currentLabel();
+    const label = labelOverride === undefined ? this.currentLabel() : null;
     this.say(`${tool.title}…`);
 
+    const imageId = this.image.id;
+    const body = {
+      imageId,
+      params,
+      // A prompt tool names what it found; a gesture tool is told the class.
+      label: labelOverride !== undefined ? labelOverride : label ? label.name : "",
+    };
     let result;
-    try {
-      result = await this.api.runTool(this.projectId, tool.name, {
-        imageId: this.image.id,
-        params: { box },
-        label: label ? label.name : "",
-      });
-    } catch (error) {
-      // A tool that is warming up is not a failure. Say when to try again
-      // rather than making the user guess, and never lose the box they drew.
-      if (error.status === 503 && error.payload && error.payload.detail) {
-        const detail = error.payload.detail;
-        const wait = detail.retry_after_ms || 500;
-        this.say(`${tool.title} is warming up — try again in ${Math.ceil(wait / 100) / 10}s`);
+    const started = performance.now();
+    for (;;) {
+      try {
+        result = await this.api.runTool(this.projectId, tool.name, body);
+        break;
+      } catch (error) {
+        // A tool that is warming up, or still working on a slow machine, is
+        // not a failure: wait as it asks and ask again, saying so, for up to
+        // two minutes -- the first use downloads weights. Never lose the box.
+        const detail = error.status === 503 && error.payload ? error.payload.detail : null;
+        if (detail && detail.retry_after_ms && performance.now() - started < 120000) {
+          if (this.image && this.image.id !== imageId) return; // moved on
+          const seconds = Math.round((performance.now() - started) / 1000);
+          this.say(`${tool.title}: ${detail.message || "working"}… ${seconds}s`);
+          await pause(Math.max(300, detail.retry_after_ms));
+          continue;
+        }
+        this.say(`${describe(error)} — drawing by hand still works`);
         return;
       }
-      this.say(`${describe(error)} — drawing by hand still works`);
-      return;
     }
+    if (!this.image || this.image.id !== imageId) return;
 
     const made = result.shapes || [];
     if (!made.length) {
@@ -1300,7 +1319,7 @@ class Editor {
       this.scene.clampShape({
         id: draftId(),
         label: raw.label,
-        labelIdx: label ? label.idx : -1,
+        labelIdx: label ? label.idx : this.rail.indexFor(raw.label),
         bbox: raw.bbox.slice(),
         polygon: raw.polygon ? raw.polygon.map((p) => p.slice()) : null,
         kind: raw.kind || (raw.polygon ? "polygon" : "box"),
@@ -1319,6 +1338,52 @@ class Editor {
         (points ? `, ${points} points` : "") +
         " — drag a vertex to correct it"
     );
+  }
+
+  // "Find every handle": on this image now, or on every unreviewed image as
+  // a job whose results land in the review queue, dashed and filterable.
+  async runPrompt(tool, text, scope) {
+    if (!text) {
+      this.say("type what to find first");
+      return;
+    }
+    if (scope === "image") {
+      await this.runTool(tool, { text }, { label: "" });
+      if (this.rail.labels.every((l) => l.name.toLowerCase() !== text.toLowerCase())) {
+        // The class is made by the save, as always; refresh the rail after it.
+        await this.flushSave();
+        const payload = await this.api.labels(this.projectId);
+        this.rail.setLabels(payload.labels);
+      }
+      return;
+    }
+    await this.flushSave();
+    this.say(`finding "${text}" on every unreviewed image…`);
+    try {
+      const job = await this.api.runToolBatch(this.projectId, tool.name, { params: { text }, states: ["todo", "in_progress"] });
+      let status = job;
+      while (!["finished", "failed", "cancelled"].includes(status.state)) {
+        await pause(800);
+        status = await this.api.job(job.id);
+        if (status.progress) this.say(`finding "${text}": ${status.progress}`);
+      }
+      if (status.state !== "finished") {
+        this.say(`search ${status.state}: ${status.error || "no detail"}`);
+        return;
+      }
+      const data = (status.result && status.result.data) || {};
+      await this.loadImageList();
+      const payload = await this.api.labels(this.projectId);
+      this.rail.setLabels(payload.labels);
+      if (this.image) await this.openImage(this.image.id);
+      this.updateReviewPanel(data.agreement || null);
+      this.say(
+        `found ${data.shapes || 0} "${text}" on ${data.predicted || 0} image(s) — ` +
+          `they are predictions now: A accepts an image, the slider hides weak ones`
+      );
+    } catch (error) {
+      this.say(describe(error));
+    }
   }
 
   async loadPredictions(file) {

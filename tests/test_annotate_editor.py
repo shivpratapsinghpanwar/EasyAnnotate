@@ -54,6 +54,10 @@ def browser():
 @pytest.fixture
 def service(tmp_path, monkeypatch):
     """The real app on a real port, against a throwaway workspace."""
+    yield from _serve(tmp_path, monkeypatch)
+
+
+def _serve(tmp_path, monkeypatch):
     monkeypatch.setenv("DATAFACTORY_WORKSPACE", str(tmp_path / "ws"))
     monkeypatch.delenv("DATAFACTORY_API_KEY", raising=False)
 
@@ -1035,6 +1039,47 @@ def test_the_export_button_downloads_a_dataset(browser, service, bare_images):
         saved = download.path()
         names = _zipfile.ZipFile(saved).namelist()
         assert any(n.endswith(".json") for n in names), names
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+# -------------------------------------------------------- the prompt panel
+
+
+@pytest.fixture
+def service_with_tools(tmp_path, monkeypatch):
+    """The real app with the fake sidecar installed, so the Assist panel shows."""
+    monkeypatch.setenv("DATAFACTORY_TOOLS_MODULE", "data_factory.annotate.tools.fake")
+    from data_factory.annotate.tools.registry import REGISTRY
+
+    REGISTRY.close()
+    yield from _serve(tmp_path, monkeypatch)
+    REGISTRY.close()
+
+
+def test_typing_a_class_fills_the_review_queue(browser, service_with_tools, bare_images):
+    """'Find every X on all unreviewed images' is the whole AI-assist thesis:
+    the result is a review queue, not a drawing."""
+    base = service_with_tools
+    errors: list[str] = []
+    project = make_project(base, bare_images, "prompt")
+    page = open_editor(browser, base, project["id"], errors)
+    try:
+        page.wait_for_selector("[data-role='prompt-text']", timeout=15_000)
+        page.fill("[data-role='prompt-text']", "cone")
+        page.click("[data-role='prompt-all']")
+        page.wait_for_function(
+            "window.__editor.strip.lastCounts && window.__editor.strip.lastCounts.predicted === 3",
+            timeout=30_000,
+        )
+        # The rail refreshes after the strip; wait for it rather than race it.
+        page.wait_for_function("window.__editor.rail.labels.length === 1", timeout=10_000)
+        assert page.evaluate("window.__editor.rail.labels.map(l => l.name)") == ["cone"]
+        page.wait_for_function("window.__editor.scene.shapes.size === 1", timeout=10_000)
+        shapes = page.evaluate("[...window.__editor.scene.shapes.values()].map(s => [s.label, s.origin, s.confidence])")
+        assert shapes == [["cone", "model", 0.8]]
+        assert page.is_visible("#review")  # predictions on screen: the review panel is up
     finally:
         page.close()
     assert not errors, errors

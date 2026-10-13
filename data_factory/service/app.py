@@ -65,13 +65,14 @@ from .workspace import (
 from ..annotate import images as images_mod
 from ..annotate import projects as projects_mod
 from ..annotate.store import Store, StoreError
-from .deps import get_store, principal, store_path
+from .deps import get_store, principal, set_jobs_manager, store_path
 
 WORKSPACE = Workspace(
     resolve_workspace_root(),
     ttl_seconds=int(float(os.environ.get("DATAFACTORY_TTL_HOURS", "24")) * 3600),
 )
 JOBS = jobs_module.JobManager()
+set_jobs_manager(JOBS)
 MAX_UPLOAD = int(os.environ.get("DATAFACTORY_MAX_UPLOAD_MB", "0")) * 1024 * 1024 or MAX_UPLOAD_BYTES
 API_KEY = os.environ.get("DATAFACTORY_API_KEY", "")
 

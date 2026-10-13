@@ -129,6 +129,12 @@ export class LabelRail {
     return !!label;
   }
 
+  // The index a name maps to, or -1 for a class the server has not made yet.
+  indexFor(name) {
+    const label = this.labels.find((l) => l.name.toLowerCase() === String(name || "").toLowerCase());
+    return label ? label.idx : -1;
+  }
+
   colourFor(shape) {
     const label =
       this.labels.find((l) => l.idx === shape.labelIdx) ||

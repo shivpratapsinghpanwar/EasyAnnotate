@@ -106,7 +106,13 @@ instead of a URL, and an installer per platform (`.exe`, `.dmg`, AppImage)
 built in CI and attached to each release. One codebase still serves the pip
 install, the hosted service and the desktop app.
 
-### M3 — AI assist *(AI 2→7)*
+### M3 — AI assist *(AI 2→7)* — **shipped: SAM box/click, text prompts, batch**
+
+`easyannotate-tools` (in `tools/`) runs behind the existing sidecar protocol:
+SAM 2.1 tiny for box and click outlines, YOLO-World for text prompts, and a
+batch route that turns a prompt into predictions over every unreviewed image.
+Deferred inference keeps the wire rule on CPUs. Still open: encode-ahead for
+SAM, SAM 3 when Ultralytics ships it, a dedicated CPU/ONNX path.
 
 A real sidecar distribution behind the existing protocol, installed by the
 tool itself into its own venv (`easyannotate tools install sam`), never into

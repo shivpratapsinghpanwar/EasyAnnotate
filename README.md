@@ -52,6 +52,12 @@ What you get instead:
   and points. Rotated boxes export as YOLO-OBB and DOTA, points as COCO
   keypoints, everything to LabelMe — and a dataset of any of them still comes
   out as plain boxes when a detector wants boxes.
+- **AI assist that feeds the review loop.** `easyannotate tools install`
+  adds SAM 2 (drag a box or click: an editable outline) and text-prompted
+  detection: type `handle`, and every handle on every unreviewed image
+  arrives as a prediction to review, dashed, with a confidence slider and one
+  key to accept. The models run in their own environment, so the editor's
+  install never depends on PyTorch, and without them it works unchanged.
 - **Dataset tooling built in.** 28 operations — convert between five formats,
   find duplicates and train/val leakage, health reports, augmentation that
   moves the labels with the pixels — one `pip install` away.
@@ -262,6 +268,26 @@ easyannotate run recipes/model_loop.yaml --set project=<id> --set out=./round-2
 Export reviewed → check classes and health → split → check leakage → convert →
 resize → augment train only → report. Compare this round's report against the
 last one to see whether the loop is actually working.
+
+### AI assist
+
+```bash
+easyannotate tools install         # ~/.datafactory/tools: PyTorch, Ultralytics
+easyannotate tools install --gpu   # CUDA build of PyTorch first
+easyannotate tools status          # what the editor will find
+```
+
+Then the Assist panel appears in the editor:
+
+- **Outline (SAM)** — drag a box, or click, on an object: SAM 2.1 traces it
+  and you get a simplified polygon with draggable vertices.
+- **Find every…** — type a class name (or several: `door, handle`) and run it
+  on this image, or on *every unreviewed image* as a job. The results are
+  predictions: dashed, scored, filtered by the slider, accepted with `A`,
+  counted by the agreement figure, and never exported until reviewed.
+
+Weights download on first use. A slow machine is fine: a tool that is still
+working says so and the editor waits, while you keep drawing.
 
 ### Model-assisted shapes
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import sys
 from typing import Any
 
 from .local import LocalTool, python_for_tools
@@ -21,6 +22,9 @@ TOOLS_MODULE_ENV = "DATAFACTORY_TOOLS_MODULE"
 
 #: Set to "0" to force the base-wheel behaviour even where a tool is installed.
 TOOLS_ENABLED_ENV = "DATAFACTORY_TOOLS"
+#: What `easyannotate tools install` sets up. Used only when a tools
+#: environment exists, so a plain install never spawns a doomed subprocess.
+DEFAULT_TOOLS_MODULE = "easyannotate_tools.sidecar"
 
 
 class NullTool:
@@ -71,11 +75,13 @@ class ToolRegistry:
             return NullTool()
 
         module = os.environ.get(TOOLS_MODULE_ENV, "").strip()
-        if not module:
-            self._reason = "no tools module configured"
-            return NullTool()
-
         interpreter = python_for_tools()
+        if not module:
+            if interpreter == sys.executable and not os.environ.get("DATAFACTORY_TOOLS_PYTHON"):
+                self._reason = "no tools installed -- run: easyannotate tools install"
+                return NullTool()
+            module = DEFAULT_TOOLS_MODULE
+
         if not shutil.which(interpreter) and not os.path.isfile(interpreter):
             self._reason = f"interpreter not found: {interpreter}"
             return NullTool()

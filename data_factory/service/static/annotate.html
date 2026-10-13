@@ -150,6 +150,10 @@
   .shape-item [data-role="meta"] { color: var(--dim); font-size: 11px; }
 
   .hint { padding: 8px 10px; font-size: 11px; color: var(--dim); border-top: 1px solid var(--line); }
+  .plain-input {
+    width: 100%; background: #1d1d1a; color: var(--ink);
+    border: 1px solid var(--line); border-radius: 5px; padding: 6px 8px; font: inherit;
+  }
   select.plain {
     background: #1d1d1a; color: var(--ink); border: 1px solid var(--line);
     border-radius: 5px; font: inherit; padding: 5px 6px;
@@ -285,9 +289,20 @@
       <div class="panel-head" style="border-top:1px solid var(--line)">Assist</div>
       <div data-role="tool-list" style="padding:8px 10px;display:grid;gap:6px"></div>
       <div class="hint" style="border-top:none;padding-top:0">
-        Pick a tool, then drag a box around the object.
+        Pick a tool, then drag a box around the object — or click it.
       </div>
       <template data-role="tool-item"><div><button style="width:100%"></button></div></template>
+      <template data-role="prompt-item">
+        <div>
+          <div data-role="prompt-title" style="font-size:11px;color:var(--dim);margin-bottom:4px"></div>
+          <input data-role="prompt-text" class="plain-input" type="text"
+                 placeholder="e.g. handle, cone" autocomplete="off" spellcheck="false">
+          <div style="display:flex;gap:6px;margin-top:6px">
+            <button data-role="prompt-image" style="flex:1" title="Find them on this image">This image</button>
+            <button data-role="prompt-all" style="flex:1" title="Find them on every unreviewed image, as predictions to review">All unreviewed</button>
+          </div>
+        </div>
+      </template>
     </div>
 
     <div style="padding:8px 10px;border-top:1px solid var(--line)">

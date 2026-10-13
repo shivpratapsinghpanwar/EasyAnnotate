@@ -24,6 +24,7 @@ import os
 import secrets
 import threading
 from pathlib import Path
+from typing import Any
 
 from fastapi import Header, HTTPException
 
@@ -48,6 +49,20 @@ async def require_key(x_api_key: str = Header(default="")) -> None:
         return
     if not secrets.compare_digest(x_api_key, key):
         raise HTTPException(401, "invalid or missing X-API-Key")
+
+
+_jobs: Any = None
+
+
+def set_jobs_manager(manager: Any) -> None:
+    """The app registers its JobManager here so routers can submit work
+    without importing the app module (which imports the routers)."""
+    global _jobs
+    _jobs = manager
+
+
+def jobs_manager() -> Any:
+    return _jobs
 
 
 def data_root() -> Path:
