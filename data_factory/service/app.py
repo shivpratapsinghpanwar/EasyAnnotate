@@ -82,7 +82,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Data Factory",
+    title="EasyAnnotate",
     version=df.__version__,
     summary="Dataset preparation for computer vision: convert, clean, augment, analyse.",
     lifespan=lifespan,

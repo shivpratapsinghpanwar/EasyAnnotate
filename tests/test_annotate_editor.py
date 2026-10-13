@@ -977,3 +977,37 @@ def test_a_rotated_box_turns_and_stays_a_rectangle(browser, service, bare_images
     finally:
         page.close()
     assert not errors, errors
+
+
+# ------------------------------------------------- the desktop window's button
+
+
+def test_the_folder_button_appears_only_inside_the_window(browser, service, annotated_images):
+    """The browser page must never offer a filesystem path. Inside the native
+    window pywebview announces itself, and only then does the button show."""
+    errors: list[str] = []
+    page = browser.new_page(viewport={"width": 1280, "height": 820})
+    page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
+    try:
+        page.goto(service, wait_until="networkidle")
+        assert page.locator("#openFolderCard").is_hidden()
+
+        # Stand in for the window: the bridge answers with a project id.
+        from data_factory.annotate import attach
+        from data_factory.service.deps import get_store
+
+        project = attach.open_folder(get_store(), annotated_images)["project"]
+        page.evaluate(
+            """(id) => {
+              window.pywebview = { api: { pick_folder: async () => ({ project: id, name: 'x', images: 3 }) } };
+              window.dispatchEvent(new Event('pywebviewready'));
+            }""",
+            project.id,
+        )
+        assert page.locator("#openFolderCard").is_visible()
+        page.click("#btnOpenFolder")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        assert f"project={project.id}" in page.url
+    finally:
+        page.close()
+    assert not errors, errors

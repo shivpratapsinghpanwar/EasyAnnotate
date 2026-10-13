@@ -120,6 +120,12 @@ def build_parser() -> argparse.ArgumentParser:
     demo.add_argument("--no-browser", action="store_true", help="do not open a browser")
     demo.set_defaults(_handler=_cmd_demo)
 
+    desktop = subparsers.add_parser(
+        "app", help="open EasyAnnotate in its own window (falls back to the browser)"
+    )
+    desktop.add_argument("--browser", action="store_true", help="use the browser, not a window")
+    desktop.set_defaults(_handler=_cmd_app)
+
     for operation in registry.all_operations():
         _add_operation_parser(subparsers, operation)
 
@@ -351,6 +357,12 @@ def _serve_editor(project_id: str, args: argparse.Namespace, out: TextIO) -> int
         log_level="warning",
     )
     return 0
+
+
+def _cmd_app(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from .. import desktop
+
+    return desktop.main(["--browser"] if args.browser else [])
 
 
 def _cmd_demo(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:

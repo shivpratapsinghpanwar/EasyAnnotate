@@ -59,6 +59,11 @@ gui = ["opencv-python>=4.10"]
 # stack is in the base install now.
 web = []
 
+# `easyannotate app`: a native window instead of a browser tab. Optional
+# because it pulls a platform web-view binding (pythonnet on Windows); the
+# browser path works without it.
+desktop = ["pywebview>=5.0"]
+
 # SAM-assisted segmentation.
 #
 # REMOVED, not fixed. It used to read `sam = ["torch>=2.2", "sam2>=1.0"]`, and

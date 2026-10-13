@@ -155,7 +155,7 @@ class Editor {
       this.say(describe(error));
       return;
     }
-    document.title = `${this.project.name} — Data Factory`;
+    document.title = `${this.project.name} — EasyAnnotate`;
     document.getElementById("project-name").textContent = this.project.name;
 
     this.rail.setLabels(this.project.labels || []);

@@ -21,6 +21,10 @@ hidden = (
     + collect_submodules("anyio")
     + [
         "data_factory.service.app",
+        "data_factory.desktop",
+        # pywebview ships its own PyInstaller hooks for the platform backends;
+        # the package itself still has to be reachable from the entry script.
+        "webview",
         "encodings.idna",
         # Registered by decorator side effect, so an import scan misses them.
         "data_factory.core.ops",

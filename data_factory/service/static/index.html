@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Data Factory</title>
+<title>EasyAnnotate</title>
 <style>
 :root{
   --bg:#f6f8fa; --panel:#fff; --ink:#12181d; --muted:#5d6b76; --line:#dfe5ea;
@@ -88,13 +88,28 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg);padding:.08em 
 </head>
 <body>
 <header><div class="bar">
-  <h1>Data Factory</h1>
-  <span class="tag">Prepare a dataset for training</span>
+  <h1>EasyAnnotate</h1>
+  <span class="tag">Annotate, review, export &mdash; nothing to set up</span>
   <span class="right" id="ver"></span>
 </div></header>
 
 <main>
 <div>
+  <!-- desktop only: the system's folder dialog. Shown when the page runs
+       inside the EasyAnnotate window, where the path never leaves this
+       machine's own process. The browser version has no such button, on
+       purpose: a web page must never be able to name a filesystem path. -->
+  <div class="card hide" id="openFolderCard" style="margin-bottom:1.25rem">
+    <h2>Annotate a folder on this computer</h2>
+    <div class="row">
+      <button class="primary" id="btnOpenFolder">Open a folder&hellip;</button>
+    </div>
+    <p class="note" id="openFolderNote" style="margin:.6rem 0 0">
+      Labels already in the folder are loaded, and your edits are written back
+      into its own label files as you draw. Nothing is copied or uploaded.
+    </p>
+  </div>
+
   <!-- upload -->
   <div class="card" id="uploadCard">
     <h2>1 &middot; Your dataset</h2>
@@ -299,6 +314,33 @@ $("btnAnnotate").onclick = async () => {
     $("annotateNote").textContent = String(error.message || error);
     button.disabled = false;
     button.textContent = "Start annotating";
+  }
+};
+
+// ---------------------------------------------------------------- desktop
+// Inside the native window pywebview announces itself; only then does the
+// folder button exist. The call returns a project id, never a path.
+function enableDesktop(){
+  if(!(window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder)) return;
+  $("openFolderCard").classList.remove("hide");
+}
+window.addEventListener("pywebviewready", enableDesktop);
+enableDesktop();
+
+$("btnOpenFolder").onclick = async () => {
+  const button = $("btnOpenFolder");
+  const note = $("openFolderNote");
+  button.disabled = true;
+  try{
+    const result = await window.pywebview.api.pick_folder();
+    if(result.cancelled){ return; }
+    if(result.error){ note.textContent = result.error; return; }
+    note.textContent = `${result.name}: ${result.images} image(s), opening…`;
+    window.location = `/annotate?project=${encodeURIComponent(result.project)}`;
+  }catch(error){
+    note.textContent = String(error.message || error);
+  }finally{
+    button.disabled = false;
   }
 };
 
