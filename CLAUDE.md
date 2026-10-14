@@ -106,7 +106,7 @@ index, retiring keeps the slot, new classes append. It used to be
 - `core/` is pure: no printing, no argparse, no HTTP imports.
 - `annotate/` must not import fastapi.
 - **Clients never send filesystem paths.** Path-kind params are *refused, not
-  sanitised*. Attached projects are CLI-only for exactly this reason.
+  sanitised*. The one exception is the fenced local route below.
 - **One route takes a path: `POST /api/local/open`** (`routers/local.py`),
   and only behind all the fences: a per-launch token (minted by the CLI or
   desktop launcher, sent in the URL `#fragment`, then as `X-Local-Token`;
@@ -141,7 +141,7 @@ easyannotate demo                 # sample project in the browser
 easyannotate serve                # http://localhost:8765
 easyannotate annotate <folder>    # edit a folder's labels in place
 easyannotate train <folder>       # reviewed -> model -> predictions on the rest
-python -m pytest                  # 697; 31 browser tests skip without playwright
+python -m pytest                  # 782; 32 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3
