@@ -40,6 +40,29 @@ from .local import child_environment, python_for_tools
 PROFILE = "profile.json"
 PYTHON_VERSION = "3.12"
 
+#: Run in the new environment. Real work on the device, not
+#: torch.cuda.is_available(): measured on a 529 driver with the cu126 build,
+#: that said True while every allocation failed ("device busy or unavailable").
+_PROBE = '''
+import json, sys
+out = {"device": "cpu", "error": ""}
+import torch
+out["torch"] = torch.__version__
+def works(device):
+    x = torch.randn(128, 128, device=device)
+    float((x @ x).sum())
+try:
+    if torch.cuda.is_available():
+        works("cuda:%d" % int(sys.argv[1]))
+        out["device"] = "cuda"
+    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        works("mps")
+        out["device"] = "mps"
+except Exception as exc:
+    out["error"] = (type(exc).__name__ + ": " + str(exc)).splitlines()[0][:300]
+print("PROBE " + json.dumps(out))
+'''
+
 
 class InstallError(RuntimeError):
     pass
@@ -118,20 +141,33 @@ def install(
     home = tools_home()
     python = tools_python(home)
     uv = find_uv()
+    # Gone until this install has verified a working PyTorch: a half-finished
+    # install must not still read as "installed" with the old device.
+    (home / PROFILE).unlink(missing_ok=True)
 
     def run(command: list[str]) -> None:
         on_line("$ " + " ".join(str(part) for part in command))
-        process = subprocess.Popen(
-            [str(part) for part in command],
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            encoding="utf-8", errors="replace", env=child_environment(),
-        )
+        try:
+            process = subprocess.Popen(
+                [str(part) for part in command],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                encoding="utf-8", errors="replace", env=child_environment(),
+            )
+        except OSError as exc:
+            raise InstallError(f"could not start {command[0]}: {exc}") from None
         assert process.stdout is not None
-        for line in process.stdout:
-            line = line.rstrip()
-            if line:
-                on_line(line)
-        if process.wait() != 0:
+        try:
+            for line in process.stdout:
+                line = line.rstrip()
+                if line:
+                    on_line(line)
+            code = process.wait()
+        finally:
+            # Cancelled, or the server stopping: never leave pip running on.
+            if process.poll() is None:
+                process.kill()
+                process.wait()
+        if code != 0:
             raise InstallError(f"failed: {' '.join(str(part) for part in command[:4])} ...")
 
     if not python.is_file():
@@ -153,7 +189,8 @@ def install(
             ["--reinstall-package", "torch", "--reinstall-package", "torchvision"]
             if uv else ["--force-reinstall"]
         )
-        run(pip + ["torch", "torchvision", "--index-url", chosen.torch_index, *force])
+        packages = list(chosen.torch_packages) or ["torch", "torchvision"]
+        run(pip + [*packages, "--index-url", chosen.torch_index, *force])
 
     wheels = bundled_wheels()
     if wheels:
@@ -161,7 +198,11 @@ def install(
     elif source is not None:
         packages = ["-e", str(source), "-e", str(Path(source) / "tools")]
     else:
-        packages = ["easyannotate-tools"]
+        # Pinned to this version: the two are released together, and an
+        # unpinned name is whatever PyPI says it is today.
+        from ... import __version__
+
+        packages = [f"easyannotate-tools=={__version__}"]
     on_line("installing the EasyAnnotate tools and Ultralytics")
     run(pip + packages)
 
@@ -170,17 +211,28 @@ def install(
         "sam": chosen.sam,
         "world": chosen.world,
         "summary": chosen.summary,
+        "gpu_index": chosen.gpu_index,
         "hardware": hw.as_dict(),
     }
-    probe = subprocess.run(
-        [str(python), "-c", "import torch; print('cuda' if torch.cuda.is_available() else "
-         "('mps' if getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available() else 'cpu'))"],
-        capture_output=True, text=True, timeout=300, env=child_environment(),
-    )
-    seen = (probe.stdout or "").strip() or "unknown"
+    on_line("checking that PyTorch runs on this machine")
+    try:
+        probe = subprocess.run(
+            [str(python), "-I", "-c", _PROBE, str(chosen.gpu_index)],
+            capture_output=True, text=True, timeout=600, env=child_environment(),
+        )
+    except subprocess.TimeoutExpired:
+        raise InstallError("PyTorch took over 10 minutes to start -- try again, or `tools install --cpu`") from None
+    found = [line for line in (probe.stdout or "").splitlines() if line.startswith("PROBE ")]
+    if probe.returncode != 0 or not found:
+        tail = " ".join((probe.stderr or "").strip().splitlines()[-2:])
+        raise InstallError(f"PyTorch does not start in {home}: {tail or 'no output'}")
+    result = json.loads(found[-1][len("PROBE "):])
+    seen = result.get("device") or "cpu"
     profile["verified_device"] = seen
+    profile["torch"] = result.get("torch", "")
     if chosen.device != "cpu" and seen != chosen.device:
-        on_line(f"warning: PyTorch sees {seen}, not {chosen.device} -- the tools will run on the CPU")
+        why = result.get("error") or f"PyTorch sees {seen}"
+        on_line(f"warning: the {chosen.device} build does not run here ({why}) -- the tools will use the CPU")
         # Then use the sizes a CPU can carry, and say what really happened.
         cpu = hardware.plan(hardware.Hardware(os=hw.os, cpu_count=hw.cpu_count, ram_gb=hw.ram_gb))
         profile.update({

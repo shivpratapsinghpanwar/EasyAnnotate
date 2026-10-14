@@ -16,6 +16,7 @@ the UI blocked forever on a read that would never return.
 
 from __future__ import annotations
 
+import os
 import sys
 import traceback
 from typing import Any, BinaryIO, Protocol
@@ -35,7 +36,7 @@ class Handler(Protocol):
 def serve(handler: Handler, stdin: BinaryIO | None = None, stdout: BinaryIO | None = None) -> int:
     """Run the request loop until stdin closes. Returns a process exit code."""
     source = stdin if stdin is not None else sys.stdin.buffer
-    sink = stdout if stdout is not None else sys.stdout.buffer
+    sink = stdout if stdout is not None else _private_stdout()
 
     for line in source:
         if not line.strip():
@@ -73,6 +74,23 @@ def serve(handler: Handler, stdin: BinaryIO | None = None, stdout: BinaryIO | No
             return 0
 
     return 0
+
+
+def _private_stdout() -> BinaryIO:
+    """Keep the real stdout for replies alone; everything else goes to stderr.
+
+    Libraries print. Ultralytics writes its download progress bar -- 13 KB of
+    carriage returns and no newline -- to stdout, and the next reply was
+    glued to the end of it and lost: on a first text prompt the editor said
+    "the tool exited". Measured, then fixed here for every library at once:
+    Python-level prints and C-level writes to fd 1 both land on stderr,
+    which the parent keeps as the tool's log.
+    """
+    sys.stdout.flush()
+    replies = os.fdopen(os.dup(sys.stdout.fileno()), "wb")
+    os.dup2(sys.stderr.fileno(), sys.stdout.fileno())
+    sys.stdout = sys.stderr
+    return replies
 
 
 def _dispatch(handler: Handler, method: str, params: dict[str, Any]) -> Any:

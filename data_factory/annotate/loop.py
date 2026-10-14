@@ -4,10 +4,11 @@ person reviews its mistakes -- hardest first.
     easyannotate train ./doors          # reviewed -> model -> predictions
     easyannotate predict ./doors --model best.pt
 
-**Command-line only, on purpose.** A ``.pt`` file is a pickle, and loading a
-model runs it. Over HTTP that would let a client name a file for the server
-to execute; here the path comes from a person typing it into their own
-terminal -- the same rule that keeps attached folders off the web.
+**No client names a model file.** A ``.pt`` file is a pickle, and loading a
+model runs it. On the command line the path comes from a person typing it
+into their own terminal. The app's Train/Predict buttons (the token-fenced
+local routes) use only the project's own latest model, found here under
+``models_home()`` -- the page sends a project id, never a path.
 
 Training and inference run in the tools environment (``easyannotate tools
 install``), never in this one: inference through the sidecar protocol, and
@@ -35,6 +36,7 @@ from . import review
 from . import shapes as shapes_mod
 from .projects import Project
 from .store import Store, StoreError
+from .tools.install import read_profile
 from .tools.local import child_environment, python_for_tools
 from .tools.registry import REGISTRY
 from .tools.results import shapes_from_result
@@ -108,48 +110,65 @@ def predict(
                 break
             offset += 5000
 
-    predicted = shapes_total = failed = 0
+    predicted = shapes_total = failed = skipped = 0
     first_error = ""
     touched: list[str] = []
     started = time.time()
-    for index, image in enumerate(targets):
+    root = Path(image_root).resolve()
+    try:
+        for index, image in enumerate(targets):
+            if on_progress:
+                on_progress(index, len(targets), image.name)
+            path = (root / image.rel_path).resolve()
+            if not path.is_relative_to(root) or not path.is_file():
+                failed += 1
+                continue
+            try:
+                raw = REGISTRY.invoke_waiting(
+                    tool,
+                    {
+                        "image_id": image.id,
+                        "image_path": str(path),
+                        "width": image.width,
+                        "height": image.height,
+                        "model": str(model),
+                        "conf": conf,
+                    },
+                    budget_s=600.0,
+                )
+            except Exception as exc:
+                failed += 1
+                if not first_error:
+                    first_error = f"{image.name}: {exc}"
+                continue
+            made = shapes_from_result(raw, "", image.width, image.height)
+            # The list was read minutes ago. Someone reviewing alongside the
+            # run may have accepted or started this image since: re-read it,
+            # and refuse to write over anything that moved on.
+            try:
+                current = images_mod.get(store, project, image.id)
+                if current.state not in wanted:
+                    skipped += 1
+                    continue
+                review.set_predictions(store, project, current, made, base_version=current.version)
+            except StoreError:
+                skipped += 1
+                continue
+            touched.append(image.id)
+            predicted += 1
+            shapes_total += len(made)
         if on_progress:
-            on_progress(index, len(targets), image.name)
-        path = (Path(image_root) / image.rel_path)
-        if not path.is_file():
-            failed += 1
-            continue
-        try:
-            raw = REGISTRY.invoke_waiting(
-                tool,
-                {
-                    "image_id": image.id,
-                    "image_path": str(path),
-                    "width": image.width,
-                    "height": image.height,
-                    "model": str(model),
-                    "conf": conf,
-                },
-                budget_s=600.0,
-            )
-        except Exception as exc:
-            failed += 1
-            if not first_error:
-                first_error = f"{image.name}: {exc}"
-            continue
-        made = shapes_from_result(raw, "", image.width, image.height)
-        review.set_predictions(store, project, image, made)
-        touched.append(image.id)
-        predicted += 1
-        shapes_total += len(made)
-    if on_progress:
-        on_progress(len(targets), len(targets), "done")
-    attach_mod.sync(store, project, touched)
+            on_progress(len(targets), len(targets), "done")
+    finally:
+        # Even when cancelled halfway: what was predicted is in the database,
+        # so it goes to the folder's label files too.
+        attach_mod.sync(store, project, touched)
     return {
         "images": len(targets),
         "predicted": predicted,
         "shapes": shapes_total,
         "failed": failed,
+        "skipped_changed": skipped,
         "first_error": first_error,
         "seconds": round(time.time() - started, 1),
         "agreement": shapes_mod.agreement(store, project),
@@ -206,6 +225,9 @@ def train(
             "--imgsz", str(int(imgsz)),
             "--out", str(runs),
             "--name", stamp,
+            # What the install verified, not torch.cuda.is_available(): that
+            # says yes on a driver the CUDA build cannot actually run on.
+            "--device", _train_device(),
         ]
         result: dict[str, Any] | None = None
         tail: list[str] = []
@@ -253,6 +275,13 @@ def train(
     saved.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(best, saved)
     return {"model": saved, "metrics": result.get("metrics") or {}, "log": log_path}
+
+
+def _train_device() -> str:
+    profile = read_profile()
+    if profile.get("device") == "cuda":
+        return str(int(profile.get("gpu_index") or 0))
+    return "mps" if profile.get("device") == "mps" else "cpu"
 
 
 def latest_model(project: Project) -> Path | None:

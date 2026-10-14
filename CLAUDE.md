@@ -98,9 +98,12 @@ index, retiring keeps the slot, new classes append. It used to be
   key, a non-localhost bind, or `DATAFACTORY_ALLOW_ATTACHED=0`). It returns a
   project id. Operations still never take paths from clients -- running ops
   in place on arbitrary folders from a browser is deliberately not offered.
-- **No HTTP route loads a model file.** A `.pt` is a pickle: loading it runs
+- **No client names a model file.** A `.pt` is a pickle: loading it runs
   it. Tools of kind `"model"` are refused by every tools route and hidden from
-  the editor; `easyannotate predict/train` are the only way in.
+  the editor. The one HTTP path that loads a model is the token-fenced
+  `/api/local/train|predict`, and it loads only the project's own latest
+  model from `models_home()` -- the page sends a project id, never a path.
+  `easyannotate predict --model` is the only way to name a file.
 - Every operation declares its params once (`core/registry.py`); CLI, menu,
   recipe validator and web form are all generated from that.
 - Editor JS: no `innerHTML`. `<template>` + `cloneNode` + `textContent`.

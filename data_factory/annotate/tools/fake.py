@@ -90,6 +90,15 @@ class FakeTool:
     def invoke(self, params: dict[str, Any]) -> dict[str, Any]:
         image_id = str(params.get("image_id") or "")
 
+        # A library printing to stdout, as Ultralytics does while it
+        # downloads weights: from Python, and straight to the descriptor.
+        if os.environ.get("DFX_FAKE_NOISE"):
+            import sys
+
+            sys.stdout.write("\r\x1b[KDownloading weights: 0% \u2500\u2500" * 40)
+            sys.stdout.flush()
+            os.write(1, "\r\x1b[KDownloading weights: 100% \u2501".encode())
+
         # Behaviours a test can ask for by name, each mirroring a real failure
         # mode of a GPU-backed tool.
         behaviour = str(params.get("behaviour") or "")

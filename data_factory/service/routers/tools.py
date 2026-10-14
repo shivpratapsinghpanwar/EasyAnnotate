@@ -131,7 +131,15 @@ def invoke_tool_batch(
                 failed += 1
                 continue
             made = _shapes_from(raw, label, image.width, image.height)
-            review.set_predictions(store, project, image, made)
+            # Re-read: a person may have reviewed this image while the batch
+            # ran, and their work is not the batch's to replace.
+            try:
+                current = images_mod.get(store, project, image.id)
+                if current.state not in wanted:
+                    continue
+                review.set_predictions(store, project, current, made, base_version=current.version)
+            except StoreError:
+                continue
             predicted += 1
             shapes_total += len(made)
         context.emit(len(targets), len(targets), "done")

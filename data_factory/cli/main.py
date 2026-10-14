@@ -473,7 +473,7 @@ def _cmd_tools_install(args: argparse.Namespace, out: TextIO, err: TextIO) -> in
             device=device,
             on_line=lambda line: (out.write(f"  {line}\n"), out.flush()),
         )
-    except installer.InstallError as exc:
+    except (installer.InstallError, OSError) as exc:
         err.write(f"{exc}\n")
         return 1
     out.write("\nModel weights download on first use.\n")

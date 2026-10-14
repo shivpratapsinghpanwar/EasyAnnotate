@@ -6,6 +6,35 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
 `easyannotate demo`. The Python package stays `data_factory`, and
 `datafactory` still works as a command.
 
+### Three ways to run it
+- **In the browser, bound to this computer.** The launchers (`serve`,
+  `annotate`, `demo`, the desktop app) mint a key per launch and hand it to
+  the page in the URL fragment. With it, the front page opens folders on
+  this computer by path or with the system dialog. While bound to
+  loopback, every route refuses a request that names another host, which
+  stops DNS-rebinding pages. See `service/routers/local.py`.
+- **Headless.** `import easyannotate as ea`: `ea.open_folder(...)`, then
+  counts, images (`order="uncertain"`), import_predictions, train, predict
+  and export, with typed errors. `easyannotate serve --headless` serves
+  without a browser.
+- **Desktop.** The app carries uv and both wheels, so "Install AI tools"
+  works with no Python on the machine. Train and Predict buttons in the
+  editor.
+
+### AI tools on request, sized to the machine
+- `easyannotate tools install` (and the app's button) reads the GPU, VRAM
+  and driver and installs the matching PyTorch: CUDA 12.8 or 12.6 from
+  each toolkit's own driver version up, PyTorch 2.7 with CUDA 11.8 below
+  that, Metal on Apple silicon, CPU otherwise. Model sizes follow memory:
+  SAM 2.1 base / small / tiny, YOLO-World large / medium / small.
+- Before it reports a GPU, the installer runs real work on it. Measured
+  on an RTX 2050 with driver 529: the CUDA 12.6 build reported the GPU
+  available and then failed every allocation. That machine now gets 2.7+cu118
+  and runs on the GPU. If even that fails, the tools use the CPU and say why.
+- With two GPUs, the models run on the card they were sized for.
+- A reinstall stops the sidecar first (Windows cannot replace a loaded DLL),
+  and a failed install no longer reads as installed.
+
 ### Editor
 - Guides while drawing, with the box size in image pixels beside the cursor.
 - Draw anywhere — inside other boxes too. Click selects; drag a selected shape
@@ -24,8 +53,13 @@ The tool is now called **EasyAnnotate**: `pip install easyannotate`,
 - `easyannotate train FOLDER`: reviewed images become a YOLO model (trained in
   the tools environment), which then predicts every unreviewed image.
 - `easyannotate predict FOLDER --model best.pt`: any Ultralytics detect,
-  segment or OBB model, as predictions to review. Command-line only: a model
-  file is code, and the HTTP routes refuse model tools outright.
+  segment or OBB model, as predictions to review. A model file is code, so
+  only the command line names one; the app's Train and Predict buttons use
+  the project's own latest model, and the tools routes refuse model tools.
+- A predict or batch prompt that runs while someone reviews leaves alone
+  every image reviewed or started meanwhile. One train-or-predict per
+  project at a time; cancel stops it; a run where every image failed is
+  reported as a failure.
 - Review queue: every image carries an uncertainty score (ambiguous
   confidences, plus overlapping predictions of different classes), and
   "predicted, least sure first" makes N, E and A walk it hardest first.

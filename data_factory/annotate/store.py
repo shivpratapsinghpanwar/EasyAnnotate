@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a rung is added to ``MIGRATIONS``.
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 #: The version-1 DDL lives beside this module rather than in a string, so it can
 #: be read, diffed and run through a SQLite client directly.
@@ -262,8 +262,24 @@ def _to_v6(conn: sqlite3.Connection, target: int) -> None:
         conn.execute(f"PRAGMA user_version={int(target)}")
 
 
+def _to_v7(conn: sqlite3.Connection, target: int) -> None:
+    """Count predictions that arrived without set_predictions.
+
+    Model shapes read from an attached folder's own files were stored
+    without a predicted_count until 0.4.0, so agreement left them out. The
+    surviving model shapes are a floor on what was predicted -- deletions
+    since are not recoverable -- so raise the count to at least that.
+    """
+    _step(
+        conn,
+        target,
+        "UPDATE image SET predicted_count = MAX(predicted_count,"
+        " (SELECT COUNT(*) FROM shape WHERE shape.image_id = image.id AND shape.origin = 'model'))",
+    )
+
+
 #: Rung *n* migrates a database at version *n* to version *n+1*.
-MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4, _to_v5, _to_v6]
+MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4, _to_v5, _to_v6, _to_v7]
 
 
 def open_store(root: Path | str) -> Store:

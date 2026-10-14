@@ -225,10 +225,16 @@ class SidecarClient:
                     payload = decode_message(line)
                 except ToolError:
                     # Junk on stdout is a tool that printed instead of
-                    # replying. Ignore the line rather than killing the
-                    # session; the pending call will time out and say so.
+                    # replying -- often a progress bar with no newline, with
+                    # the real reply glued to its end. Salvage that; skip
+                    # the rest rather than killing the session.
+                    payload = _salvage(line)
+                    if payload is None:
+                        continue
+                try:
+                    self._resolve(payload)
+                except Exception:  # noqa: BLE001 -- one bad frame must not stop the reader
                     continue
-                self._resolve(payload)
         except (ValueError, OSError):
             pass
         finally:
@@ -343,6 +349,18 @@ def child_environment(**extra: str) -> dict[str, str]:
     environment = {key: value for key, value in os.environ.items() if key not in PRIVATE_ENV}
     environment.update(extra)
     return environment
+
+
+def _salvage(line: bytes) -> dict[str, Any] | None:
+    """The last protocol frame inside a line that also carries junk."""
+    text = line.decode("utf-8", errors="replace")
+    start = text.rfind('{"v"')
+    if start <= 0:
+        return None
+    try:
+        return decode_message(text[start:])
+    except ToolError:
+        return None
 
 
 def python_for_tools() -> str:

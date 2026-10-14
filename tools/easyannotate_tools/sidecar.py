@@ -14,6 +14,7 @@ load would make the editor look hung for the length of a weights download.
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 import threading
@@ -153,10 +154,16 @@ def _device() -> str:
     try:
         import torch
 
-        wanted = _profile().get("device", "")
+        profile = _profile()
+        wanted = profile.get("device", "")
         if wanted == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
             return "mps"
-        return "cuda" if torch.cuda.is_available() and wanted != "cpu" else "cpu"
+        # The card the install verified and sized the models for -- not
+        # whichever CUDA happens to number 0.
+        if wanted == "cuda" and torch.cuda.is_available():
+            index = int(profile.get("gpu_index") or 0)
+            return f"cuda:{index}" if index else "cuda"
+        return "cpu"
     except Exception:
         return "cpu"
 
@@ -436,7 +443,15 @@ class SidecarTool:
         # One prompt, or several separated by commas: "door, handle".
         classes = [part.strip() for part in text.split(",") if part.strip()]
         if classes != self._world_classes:
-            model.set_classes(classes)
+            # YOLOWorld.set_classes rebuilds CLIP (338 MB) from disk on every
+            # call: measured 6.5 s per new prompt on a GPU. Keep it loaded.
+            inner = getattr(model, "model", None)
+            if inner is not None and "cache_clip_model" in inspect.signature(inner.set_classes).parameters:
+                inner.set_classes(classes, cache_clip_model=True)
+                inner.names = list(classes)
+                model.predictor = None  # what set_classes does: rebuild with the new names
+            else:  # an Ultralytics without the flag
+                model.set_classes(classes)
             self._world_classes = classes
         results = model.predict(
             str(path), device=_device(), conf=min_confidence, max_det=MAX_DETECTIONS, verbose=False

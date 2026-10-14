@@ -378,12 +378,18 @@ def set_predictions(
     project: projects_mod.Project,
     image: images_mod.Image,
     predicted: list[Any],
+    *,
+    base_version: int | None = None,
 ) -> None:
     """Replace this image's untouched model shapes with a new run's.
 
     Kept: everything a person drew, and every model shape a person has since
     corrected -- that correction is human work now. Cleared: model shapes
     nobody has looked at, which is what stops a second run doubling the boxes.
+
+    ``base_version``: refuse (``Conflict``) if the image changed since the
+    caller read it -- a long run must not overwrite what a person did
+    meanwhile.
     """
     existing = shapes_mod.listing(store, project, image)
     keep = [s for s in existing if not s.is_model or s.is_touched]
@@ -393,7 +399,7 @@ def set_predictions(
 
     # advance_state stays off: a prediction is not somebody starting work.
     shapes_mod.save(
-        store, project, image, incoming, base_version=None,
+        store, project, image, incoming, base_version=base_version,
         origin="model", advance_state=False,
     )
 

@@ -15,6 +15,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     for flag in ("--data", "--model", "--epochs", "--imgsz", "--out", "--name"):
         parser.add_argument(flag)
+    parser.add_argument("--device", default="")
     args = parser.parse_args()
     spec = yaml.safe_load(Path(args.data).read_text(encoding="utf-8"))
     root = Path(spec["path"])

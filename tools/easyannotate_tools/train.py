@@ -25,13 +25,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--imgsz", type=int, default=640)
     parser.add_argument("--out", required=True)
     parser.add_argument("--name", required=True)
+    parser.add_argument("--device", default="")
     args = parser.parse_args(argv)
 
     os.environ.setdefault("YOLO_VERBOSE", "False")
     import torch
     from ultralytics import YOLO
 
-    device = 0 if torch.cuda.is_available() else "cpu"
+    # The device the install verified, when the app says; else a guess.
+    device = args.device or (0 if torch.cuda.is_available() else "cpu")
     model = YOLO(args.model)
 
     def on_epoch(trainer) -> None:

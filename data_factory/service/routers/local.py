@@ -218,16 +218,51 @@ class LoopIn(BaseModel):
     predict: bool = True
 
 
-_running: dict[str, str] = {}   # what -> job id, so a second click joins the first
+#: "install", or "loop:<project id>" -> job id. One install at a time, one
+#: train-or-predict per project: two runs over one project would mix two
+#: models' predictions image by image.
+_running: dict[str, str] = {}
+_running_lock = threading.Lock()
 
 
-def _job_running(kind: str) -> dict[str, Any] | None:
+def _job_running(key: str) -> dict[str, Any] | None:
     jobs = jobs_manager()
-    job_id = _running.get(kind)
+    job_id = _running.get(key)
     job = jobs.get(job_id) if (jobs and job_id) else None
     if job is not None and job.state in ("queued", "running"):
         return job.as_dict()
     return None
+
+
+def _any_loop_running() -> bool:
+    return any(_job_running(key) for key in list(_running) if key.startswith("loop:"))
+
+
+def _start_loop(project, operation: str, work) -> dict[str, Any]:
+    """Submit a train or predict job, or join/refuse the one already going."""
+    jobs = jobs_manager()
+    if jobs is None:
+        raise HTTPException(503, "no job runner in this process")
+    key = f"loop:{project.id}"
+    with _running_lock:
+        if _job_running("install"):
+            raise HTTPException(409, "the AI tools are being installed -- wait for that to finish")
+        running = _job_running(key)
+        if running:
+            if running.get("operation") == operation:
+                return running  # a second click joins the first
+            raise HTTPException(409, "this project is already training or predicting -- wait for it")
+        job = jobs.submit(secrets.token_hex(8), operation, project.id, work)
+        _running[key] = job.id
+    return job.as_dict()
+
+
+def _checked(context, emit):
+    """Wrap a progress callback so a cancel request stops the work there."""
+    def callback(*args):
+        context.check_cancelled()
+        emit(*args)
+    return callback
 
 
 def _source_checkout() -> Path | None:
@@ -251,9 +286,6 @@ def tools_install(body: InstallIn) -> dict[str, Any]:
 
     if body.device not in (None, "cpu", "cuda", "mps"):
         raise HTTPException(400, "device must be cpu, cuda or mps")
-    running = _job_running("install")
-    if running:
-        return running
     jobs = jobs_manager()
     if jobs is None:
         raise HTTPException(503, "no job runner in this process")
@@ -262,22 +294,33 @@ def tools_install(body: InstallIn) -> dict[str, Any]:
         lines: list[str] = []
 
         def on_line(line: str) -> None:
+            context.check_cancelled()
             lines.append(line)
             context.emit(len(lines), 0, line[-200:])
 
         result = OpResult(op="tools.install")
+        # Stop the sidecar first: it holds torch's files open, and on Windows
+        # an open DLL cannot be replaced -- a reinstall would half-remove it.
+        REGISTRY.close()
         try:
             profile = installer.install(source=_source_checkout(), device=body.device, on_line=on_line)
-        except Exception as exc:
+        except installer.InstallError as exc:
             result.fail(str(exc))
             result.data = {"log": lines[-40:]}
             return result
-        REGISTRY.close()  # rediscover: the Assist panel appears on the next look
+        finally:
+            REGISTRY.close()  # rediscover: the Assist panel appears on the next look
         result.data = {"profile": profile, "log": lines[-40:]}
         return result
 
-    job = jobs.submit(secrets.token_hex(8), "tools.install", "local", work)
-    _running["install"] = job.id
+    with _running_lock:
+        running = _job_running("install")
+        if running:
+            return running
+        if _any_loop_running():
+            raise HTTPException(409, "a model is training or predicting -- install when it has finished")
+        job = jobs.submit(secrets.token_hex(8), "tools.install", "local", work)
+        _running["install"] = job.id
     return job.as_dict()
 
 
@@ -290,19 +333,13 @@ def train_project(body: LoopIn, store=Depends(get_store)) -> dict[str, Any]:
     project = _project(store, body.project)
     if not 1 <= body.epochs <= 500:
         raise HTTPException(400, "epochs must be between 1 and 500")
-    running = _job_running("train")
-    if running:
-        return running
-    jobs = jobs_manager()
-    if jobs is None:
-        raise HTTPException(503, "no job runner in this process")
 
     def work(context) -> OpResult:
         result = OpResult(op="loop.train")
         try:
             trained = loop.train(
                 store, project, epochs=body.epochs,
-                on_line=lambda line: context.emit(0, 0, line[-200:]),
+                on_line=_checked(context, lambda line: context.emit(0, 0, line[-200:])),
             )
             data: dict[str, Any] = {
                 "model": trained["model"].name,
@@ -311,16 +348,14 @@ def train_project(body: LoopIn, store=Depends(get_store)) -> dict[str, Any]:
             if body.predict:
                 data["predicted"] = loop.predict(
                     store, project, _image_root(project), trained["model"],
-                    on_progress=lambda done, total, name: context.emit(done, total, f"predicting {name}"),
+                    on_progress=_checked(context, lambda done, total, name: context.emit(done, total, f"predicting {name}")),
                 )
             result.data = data
         except loop.LoopError as exc:
             result.fail(str(exc))
         return result
 
-    job = jobs.submit(secrets.token_hex(8), "loop.train", project.id, work)
-    _running["train"] = job.id
-    return job.as_dict()
+    return _start_loop(project, "loop.train", work)
 
 
 @router.post("/predict", dependencies=[Depends(require_local)])
@@ -333,23 +368,23 @@ def predict_project(body: LoopIn, store=Depends(get_store)) -> dict[str, Any]:
     model = loop.latest_model(project)
     if model is None:
         raise HTTPException(409, "no model trained for this project yet -- train one first")
-    jobs = jobs_manager()
-    if jobs is None:
-        raise HTTPException(503, "no job runner in this process")
 
     def work(context) -> OpResult:
         result = OpResult(op="loop.predict")
         try:
-            result.data = {"predicted": loop.predict(
+            predicted = loop.predict(
                 store, project, _image_root(project), model,
-                on_progress=lambda done, total, name: context.emit(done, total, f"predicting {name}"),
-            ), "model": model.name}
+                on_progress=_checked(context, lambda done, total, name: context.emit(done, total, f"predicting {name}")),
+            )
+            result.data = {"predicted": predicted, "model": model.name}
+            # Every image failing is a failure, not "0 predictions".
+            if predicted["failed"] and not predicted["predicted"]:
+                result.fail(f"every image failed -- first: {predicted['first_error'] or 'image files not found'}")
         except loop.LoopError as exc:
             result.fail(str(exc))
         return result
 
-    job = jobs.submit(secrets.token_hex(8), "loop.predict", project.id, work)
-    return job.as_dict()
+    return _start_loop(project, "loop.predict", work)
 
 
 def _project(store, project_id: str):

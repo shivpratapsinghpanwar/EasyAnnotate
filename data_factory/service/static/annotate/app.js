@@ -1312,7 +1312,9 @@ class Editor {
       const score = (data.metrics || {})["metrics/mAP50(B)"];
       state.textContent =
         (kind === "train" ? `trained ${data.model}${score != null ? ` (mAP50 ${score.toFixed(2)})` : ""}; ` : "") +
-        `${predicted.shapes ?? 0} prediction(s) on ${predicted.predicted ?? 0} image(s)`;
+        `${predicted.shapes ?? 0} prediction(s) on ${predicted.predicted ?? 0} image(s)` +
+        (predicted.failed ? `; ${predicted.failed} failed (${predicted.first_error || "file missing"})` : "") +
+        (predicted.skipped_changed ? `; ${predicted.skipped_changed} left alone: reviewed meanwhile` : "");
       await this.loadImageList();
       if (this.image) await this.openImage(this.image.id);
       this.say("review them hardest first: pick 'predicted, least sure first' in the image list");
