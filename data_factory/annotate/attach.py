@@ -178,6 +178,12 @@ def _refresh_data_yaml(store: Store, project: projects_mod.Project, classes) -> 
         pass
 
 
+#: Files and folders a folder walk will look at before giving up. Ten times
+#: the 15,000-image door set with its label files, and a few seconds of walk;
+#: a whole drive is millions.
+MAX_FOLDER_ENTRIES = 1_000_000
+
+
 def open_folder(
     store: Store,
     folder: Path | str,
@@ -209,6 +215,15 @@ def open_folder(
         sidecar_format, note = detect_sidecar_format(root)
         warnings.append(note)
 
+    # Found before the project exists, so a folder with no images -- or a
+    # whole drive, refused -- leaves no empty project behind.
+    try:
+        files = fs.walk_images(root, limit=MAX_FOLDER_ENTRIES)
+    except fs.TooManyFiles as exc:
+        raise AttachError(str(exc)) from None
+    if not files:
+        raise AttachError(f"{root} has no images in it")
+
     project = existing or projects_mod.create(
         store,
         name or root.name,
@@ -217,10 +232,6 @@ def open_folder(
         root=str(root),
         sidecar_format=sidecar_format,
     )
-
-    files = sorted(fs.iter_images(root, recursive=True))
-    if not files:
-        raise AttachError(f"{root} has no images in it")
 
     entries, unreadable = _scan_sizes(root, files, ctx)
     if unreadable:

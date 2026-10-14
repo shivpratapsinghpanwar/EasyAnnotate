@@ -12,14 +12,20 @@ So opening a folder by path is the one exception, and it is fenced four ways:
    puts it in the URL's ``#fragment`` -- which a browser never sends to any
    server, never logs, never leaks in a Referer. The page moves it into
    session storage and sends it as ``X-Local-Token``. No other site has it.
-2. **Host must be this machine.** ``localhost``, ``127.0.0.1`` or ``::1``.
-   A DNS-rebinding attack arrives with the attacker's hostname, and stops here.
+2. **Host must be this machine**, and so must the client. ``localhost``,
+   ``127.0.0.1`` or ``::1``, parsed strictly; the connection itself from a
+   loopback address. A DNS-rebinding attack arrives with the attacker's
+   hostname -- and while the server is bound to loopback, ``LocalHostFence``
+   refuses that on *every* route, not only these: projects, images and
+   shapes carry no token, and they are the user's own folders.
 3. **No foreign Origin.** A browser stamps cross-site requests with the
-   page's origin; anything that is not a local origin is refused. (The custom
-   header also forces a CORS preflight, which this server never grants.)
+   page's origin; anything but this server's own exact origin is refused.
+   (The custom header also forces a CORS preflight, which is never granted.)
 4. **Local mode at all.** Only the CLI and desktop launchers set the token,
    only when bound to this machine with no API key -- the hosted and Docker
-   paths never do, and ``DATAFACTORY_ALLOW_ATTACHED=0`` turns it off.
+   paths never do, and ``DATAFACTORY_ALLOW_ATTACHED=0`` turns it off. A
+   token inherited from a parent process is cleared, never honoured, and no
+   child process (sidecar, trainer, installer) is given it.
 
 And it grants one capability: a folder becomes a project, and the page gets
 the project's *id*. Operations still run through the sandbox; the editor
@@ -29,24 +35,34 @@ Open-folder button does, for a browser.
 
 from __future__ import annotations
 
+import ipaddress
 import os
+import re
 import secrets
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlsplit
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel
+from starlette.responses import PlainTextResponse
 
 from ...annotate import attach
 from ...annotate import projects as projects_mod
 from ...annotate.store import StoreError
-from ..deps import get_store, jobs_manager, media_root
+from ...annotate.tools.local import child_environment
+from ..deps import api_key, get_store, jobs_manager, media_root
 
 TOKEN_ENV = "EASYANNOTATE_LOCAL_TOKEN"
+#: Set by a launcher that binds to loopback: turns on ``LocalHostFence``.
+LOOPBACK_ENV = "EASYANNOTATE_LOOPBACK"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+#: A Host header as a browser sends it: a name or bracketed IPv6, an optional
+#: port, nothing else. ``evil@localhost`` and ``localhost/x`` are not hosts.
+_HOST_SHAPE = re.compile(r"^(?:[A-Za-z0-9.-]+|\[[0-9A-Fa-f:.]+\])(?::[0-9]{1,5})?$")
 
 router = APIRouter(prefix="/api/local", tags=["local"])
 
@@ -59,7 +75,53 @@ def mint_token() -> str:
 
 
 def local_mode_enabled() -> bool:
-    return bool(os.environ.get(TOKEN_ENV)) and projects_mod.attached_allowed()
+    return bool(os.environ.get(TOKEN_ENV)) and projects_mod.attached_allowed() and not api_key()
+
+
+def fence_active() -> bool:
+    return os.environ.get(LOOPBACK_ENV) == "1" or local_mode_enabled()
+
+
+def host_is_local(value: str) -> bool:
+    """The Host header names this machine -- strictly parsed."""
+    return bool(value) and bool(_HOST_SHAPE.match(value)) and _hostname(value) in LOCAL_HOSTS
+
+
+def client_is_loopback(request: Request) -> bool:
+    """The connection itself came from this machine, not just its Host header."""
+    if request.client is None:
+        return False
+    try:
+        address = ipaddress.ip_address(request.client.host)
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return address.is_loopback
+
+
+class LocalHostFence:
+    """While the server is bound to this machine, answer only to its names.
+
+    A DNS-rebinding page reaches 127.0.0.1 under a hostname of its own. The
+    token keeps it out of ``/api/local``, but the project, image and shape
+    routes have no token -- without this fence such a page could read a
+    user's attached folders and rewrite their label files. Measured: it did.
+    """
+
+    def __init__(self, app: Any) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
+        if scope["type"] == "http" and fence_active():
+            hosts = [value.decode("latin-1") for key, value in scope.get("headers", []) if key == b"host"]
+            if len(hosts) != 1 or not host_is_local(hosts[0]):
+                response = PlainTextResponse(
+                    "this EasyAnnotate serves this computer only -- open it at localhost", status_code=403
+                )
+                await response(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
 
 
 def _hostname(value: str) -> str:
@@ -76,14 +138,19 @@ def _hostname(value: str) -> str:
 
 def require_local(request: Request, x_local_token: str = Header(default="")) -> None:
     expected = os.environ.get(TOKEN_ENV, "")
-    if not expected or not projects_mod.attached_allowed():
+    if not local_mode_enabled():
         raise HTTPException(404, "local mode is off -- start EasyAnnotate on this computer")
-    if not x_local_token or not secrets.compare_digest(x_local_token, expected):
+    # isascii first: compare_digest raises on non-ASCII text, and a 500 with a
+    # traceback is a worse answer than a refusal.
+    if not x_local_token or not x_local_token.isascii() or not secrets.compare_digest(x_local_token, expected):
         raise HTTPException(403, "this page was not opened by EasyAnnotate on this computer")
-    if _hostname(request.headers.get("host", "")) not in LOCAL_HOSTS:
+    hosts = request.headers.getlist("host")
+    if len(hosts) != 1 or not host_is_local(hosts[0]):
         raise HTTPException(403, "local requests must be addressed to this computer")
+    if not client_is_loopback(request):
+        raise HTTPException(403, "local requests must come from this computer")
     origin = request.headers.get("origin")
-    if origin is not None and _hostname(origin) not in LOCAL_HOSTS:
+    if origin is not None and origin.lower() != f"{request.url.scheme}://{hosts[0]}".lower():
         raise HTTPException(403, "requests from other sites are refused")
 
 
@@ -99,11 +166,21 @@ def status() -> dict[str, Any]:
 
 @router.post("/open", dependencies=[Depends(require_local)])
 def open_path(body: OpenIn, store=Depends(get_store)) -> dict[str, Any]:
-    folder = Path(body.path.strip().strip('"')).expanduser()
+    raw = body.path.strip().strip('"')
+    # UNC shares and \\?\ / \\.\ device paths: each is a second spelling of
+    # some folder (so a second project writing the same label files), and
+    # \\.\C:\ is a whole drive. A mapped drive letter works; the CLI takes any.
+    if raw.startswith(("\\\\", "//")):
+        raise HTTPException(400, "network and device paths are not opened from the browser -- "
+                                 "use a drive letter, or `easyannotate annotate <folder>`")
+    folder = Path(raw).expanduser()
     if not folder.is_absolute():
         raise HTTPException(400, "give the full path to a folder, e.g. D:\\photos\\doors")
     if not folder.is_dir():
         raise HTTPException(400, f"there is no folder at {folder}")
+    resolved = folder.resolve()
+    if resolved.parent == resolved or resolved == Path.home().resolve():
+        raise HTTPException(400, "that is a whole drive or your home folder -- pick the folder of images")
     return _opened(store, folder)
 
 
@@ -112,7 +189,12 @@ def pick(store=Depends(get_store)) -> dict[str, Any]:
     """The operating system's own folder dialog, on this computer."""
     if not _dialog_available():
         raise HTTPException(501, "no folder dialog here -- type the path instead")
-    chosen = _run_dialog()
+    if not _dialog_lock.acquire(blocking=False):
+        raise HTTPException(409, "a folder dialog is already open on this computer")
+    try:
+        chosen = _run_dialog()
+    finally:
+        _dialog_lock.release()
     if not chosen:
         return {"cancelled": True}
     return _opened(store, Path(chosen))
@@ -310,6 +392,8 @@ def _dialog_available() -> bool:
     return True
 
 
+_dialog_lock = threading.Lock()
+
 _DIALOG = (
     "import tkinter, tkinter.filedialog as d\n"
     "r = tkinter.Tk(); r.withdraw(); r.attributes('-topmost', True)\n"
@@ -321,8 +405,13 @@ def _run_dialog() -> str:
     """In a child process: Tk wants its own main thread, which a request
     handler is not, and a dialog left open must not wedge the server."""
     try:
+        # -I: isolated. `-c` otherwise imports from the working directory
+        # first, and a tkinter.py planted in a dataset folder would run.
+        # UTF-8 both ways, or a folder named in Hindi comes back "cancelled".
         done = subprocess.run(
-            [sys.executable, "-c", _DIALOG], capture_output=True, text=True, timeout=600
+            [sys.executable, "-I", "-c", _DIALOG],
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=600,
+            env=child_environment(PYTHONIOENCODING="utf-8"),
         )
     except (OSError, subprocess.TimeoutExpired):
         return ""

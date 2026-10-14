@@ -132,6 +132,42 @@ def iter_images(
             yield path
 
 
+class TooManyFiles(ValueError):
+    """A folder walk passed its limit -- usually a whole drive, picked by mistake."""
+
+
+def walk_images(root: Path, *, limit: int, exts: Iterable[str] = IMAGE_EXTS) -> list[Path]:
+    """Every image under a folder someone *chose*, sorted.
+
+    Unlike :func:`iter_images`, a directory link is never followed -- a
+    symlink, or on Windows a junction, can point back up the tree and walk
+    forever, or out of the chosen folder -- and the walk stops after
+    ``limit`` entries rather than reading a whole drive.
+    """
+    extset = {e.lower() for e in exts}
+    found: list[Path] = []
+    seen = 0
+    pending = [root]
+    while pending:
+        try:
+            entries = list(os.scandir(pending.pop()))
+        except OSError:
+            continue
+        for entry in entries:
+            seen += 1
+            if seen > limit:
+                raise TooManyFiles(f"more than {limit:,} files under {root} -- open a smaller folder")
+            try:
+                if entry.is_dir(follow_symlinks=False):
+                    if not (entry.is_symlink() or entry.is_junction()):
+                        pending.append(Path(entry.path))
+                elif entry.is_file() and os.path.splitext(entry.name)[1].lower() in extset:
+                    found.append(Path(entry.path))
+            except OSError:
+                continue
+    return sorted(found)
+
+
 def iter_files(
     root: Path, *, recursive: bool = False, exts: Iterable[str] | None = None
 ) -> Iterator[Path]:

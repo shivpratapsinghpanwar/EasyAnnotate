@@ -35,7 +35,7 @@ from pathlib import Path
 from typing import Any
 
 from ... import hardware
-from .local import python_for_tools
+from .local import child_environment, python_for_tools
 
 PROFILE = "profile.json"
 PYTHON_VERSION = "3.12"
@@ -124,7 +124,7 @@ def install(
         process = subprocess.Popen(
             [str(part) for part in command],
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-            encoding="utf-8", errors="replace",
+            encoding="utf-8", errors="replace", env=child_environment(),
         )
         assert process.stdout is not None
         for line in process.stdout:
@@ -175,7 +175,7 @@ def install(
     probe = subprocess.run(
         [str(python), "-c", "import torch; print('cuda' if torch.cuda.is_available() else "
          "('mps' if getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available() else 'cpu'))"],
-        capture_output=True, text=True, timeout=300,
+        capture_output=True, text=True, timeout=300, env=child_environment(),
     )
     seen = (probe.stdout or "").strip() or "unknown"
     profile["verified_device"] = seen

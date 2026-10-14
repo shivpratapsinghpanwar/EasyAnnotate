@@ -47,7 +47,8 @@ async def require_key(x_api_key: str = Header(default="")) -> None:
     key = api_key()
     if not key:
         return
-    if not secrets.compare_digest(x_api_key, key):
+    # isascii first: compare_digest raises on non-ASCII text -- a 500, not a 401.
+    if not x_api_key.isascii() or not secrets.compare_digest(x_api_key, key):
         raise HTTPException(401, "invalid or missing X-API-Key")
 
 

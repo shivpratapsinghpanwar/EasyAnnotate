@@ -170,11 +170,17 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     os.environ.setdefault("DATAFACTORY_WORKSPACE", str(default_workspace()))
     port = free_port()
-    from .service.routers.local import mint_token
+    from .annotate import projects
+    from .service.routers.local import LOOPBACK_ENV, TOKEN_ENV, mint_token
 
     # The window is this machine's own; the token lets its page open folders
-    # by path too, not only through the dialog.
-    url = f"http://127.0.0.1:{port}/#token={mint_token()}"
+    # by path too, not only through the dialog. Loopback: refuse any request
+    # that names another host (see LocalHostFence).
+    os.environ[LOOPBACK_ENV] = "1"
+    os.environ.pop(TOKEN_ENV, None)
+    url = f"http://127.0.0.1:{port}/"
+    if projects.attached_allowed():
+        url += f"#token={mint_token()}"
 
     # Flushed: when the console is a pipe the banner would otherwise sit in a
     # buffer until exit, and the one thing a launcher must do is say its URL.

@@ -35,7 +35,7 @@ from . import review
 from . import shapes as shapes_mod
 from .projects import Project
 from .store import Store, StoreError
-from .tools.local import python_for_tools
+from .tools.local import child_environment, python_for_tools
 from .tools.registry import REGISTRY
 from .tools.results import shapes_from_result
 
@@ -209,7 +209,7 @@ def train(
         ]
         result: dict[str, Any] | None = None
         tail: list[str] = []
-        env = {**os.environ, "PYTHONUNBUFFERED": "1"}
+        env = child_environment(PYTHONUNBUFFERED="1")
         with open(log_path, "w", encoding="utf-8") as log:
             process = subprocess.Popen(
                 command,
@@ -320,7 +320,7 @@ def _can_import(python: str, module: str) -> bool:
             return False
     try:
         return subprocess.run(
-            [python, "-c", f"import {module}"], capture_output=True, timeout=120
+            [python, "-c", f"import {module}"], capture_output=True, timeout=120, env=child_environment()
         ).returncode == 0
     except Exception:
         return False

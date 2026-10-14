@@ -17,6 +17,9 @@ from fastapi.testclient import TestClient
 from conftest import make_image, write_voc
 
 TOKEN = "a-test-token-that-is-long-enough"
+#: The peer address of a connection from this machine; TestClient's default
+#: ("testclient") is not an address at all, and is refused.
+LOOPBACK = ("127.0.0.1", 50000)
 
 
 @pytest.fixture
@@ -39,7 +42,7 @@ def app_module(tmp_path, monkeypatch):
 def local(app_module, monkeypatch):
     """Local mode on, a client addressed to this machine."""
     monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
-    with TestClient(app_module.app, base_url="http://localhost:8765") as client:
+    with TestClient(app_module.app, base_url="http://localhost:8765", client=LOOPBACK) as client:
         yield client
 
 
@@ -59,7 +62,7 @@ def ok_headers(**extra):
 
 
 def test_local_mode_is_off_unless_a_launcher_turned_it_on(app_module, folder):
-    with TestClient(app_module.app, base_url="http://localhost:8765") as client:
+    with TestClient(app_module.app, base_url="http://localhost:8765", client=LOOPBACK) as client:
         assert client.get("/api/local/status", headers=ok_headers()).status_code == 404
         assert client.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers()).status_code == 404
 
@@ -75,7 +78,7 @@ def test_a_request_addressed_to_another_host_is_refused(app_module, monkeypatch,
     """DNS rebinding: an attacker's page reaches this server under the
     attacker's hostname. With the right token it is still refused."""
     monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
-    with TestClient(app_module.app, base_url="http://localhost:8765") as client:
+    with TestClient(app_module.app, base_url="http://localhost:8765", client=LOOPBACK) as client:
         response = client.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers(host=host))
         assert response.status_code == 403
 
@@ -220,3 +223,139 @@ def test_training_from_the_page_trains_on_reviewed_work(local, folder, tmp_path,
     assert job["result"]["data"]["model"].endswith(".pt")
     assert local.post("/api/local/train", json={"project": project, "epochs": 0},
                       headers=ok_headers()).status_code == 400
+
+
+# ------------------------------------------- what the security review found
+
+
+def test_a_rebinding_page_cannot_reach_any_route(local, app_module, folder):
+    """Not only /api/local: projects, images and shapes are the user's own
+    folders once attached, and they carry no token."""
+    opened = local.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers())
+    assert opened.status_code == 200
+    assert local.get("/api/projects").status_code == 200
+    for host in ("attacker.example", "127.0.0.1.nip.io", "evil@localhost", "localhost/x"):
+        assert local.get("/api/projects", headers={"host": host}).status_code == 403, host
+
+
+def test_the_fence_holds_on_loopback_even_without_a_token(app_module, monkeypatch):
+    monkeypatch.setenv("EASYANNOTATE_LOOPBACK", "1")
+    with TestClient(app_module.app, base_url="http://127.0.0.1:8765", client=LOOPBACK) as client:
+        assert client.get("/api/health").status_code == 200
+        assert client.get("/api/health", headers={"host": "attacker.example"}).status_code == 403
+
+
+def test_a_request_from_another_machine_is_refused_even_saying_localhost(app_module, monkeypatch, folder):
+    monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
+    with TestClient(app_module.app, base_url="http://localhost:8765", client=("192.168.0.104", 5000)) as client:
+        response = client.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers())
+    assert response.status_code == 403
+
+
+def test_an_inherited_token_is_never_honoured(app_module, monkeypatch, folder):
+    from data_factory.cli.main import _local_fragment
+
+    monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
+    assert _local_fragment(argparse.Namespace(host="0.0.0.0", api_key=None)) == ""
+    import os
+
+    assert "EASYANNOTATE_LOCAL_TOKEN" not in os.environ
+    # And behind an API key, a token in the environment opens nothing.
+    monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
+    monkeypatch.setenv("DATAFACTORY_API_KEY", "k")
+    with TestClient(app_module.app, base_url="http://localhost:8765", client=LOOPBACK) as client:
+        response = client.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers())
+    assert response.status_code == 404
+
+
+def test_no_token_with_attached_projects_switched_off(monkeypatch):
+    from data_factory.cli.main import _local_fragment
+
+    monkeypatch.setenv("DATAFACTORY_ALLOW_ATTACHED", "0")
+    assert _local_fragment(argparse.Namespace(host="127.0.0.1", api_key=None)) == ""
+
+
+def test_children_never_get_the_token(monkeypatch):
+    from data_factory.annotate.tools.local import child_environment
+
+    monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", TOKEN)
+    monkeypatch.setenv("DATAFACTORY_API_KEY", "k")
+    environment = child_environment(EXTRA="1")
+    assert "EASYANNOTATE_LOCAL_TOKEN" not in environment
+    assert "DATAFACTORY_API_KEY" not in environment
+    assert environment["EXTRA"] == "1"
+
+
+def test_another_local_port_is_a_foreign_origin(local, folder):
+    response = local.post("/api/local/open", json={"path": str(folder)},
+                          headers=ok_headers(origin="http://localhost:3000"))
+    assert response.status_code == 403
+
+
+def test_a_non_ascii_token_is_refused_not_a_crash(local):
+    response = local.get("/api/local/status", headers={"X-Local-Token": "टोकन".encode()})
+    assert response.status_code == 403
+
+
+@pytest.mark.parametrize("path", ["\\?\C:\Windows", "\\.\C:\\", "\\localhost\C$\Windows", "//server/share"])
+def test_device_and_network_paths_are_refused(local, path):
+    response = local.post("/api/local/open", json={"path": path}, headers=ok_headers())
+    assert response.status_code == 400
+
+
+def test_a_whole_drive_is_refused(local, tmp_path):
+    root = tmp_path.anchor
+    response = local.post("/api/local/open", json={"path": root}, headers=ok_headers())
+    assert response.status_code == 400
+
+
+def test_an_empty_folder_leaves_no_project_behind(local, tmp_path):
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    before = len(local.get("/api/projects").json()["projects"])
+    assert local.post("/api/local/open", json={"path": str(empty)}, headers=ok_headers()).status_code == 400
+    assert len(local.get("/api/projects").json()["projects"]) == before
+
+
+def test_the_dialog_runs_isolated_and_in_utf8(monkeypatch):
+    from data_factory.service.routers import local as local_mod
+
+    seen = {}
+
+    class Done:
+        stdout = "D:\फ़ोटो\n"
+
+    def fake_run(command, **kwargs):
+        seen.update(command=command, **kwargs)
+        return Done()
+
+    monkeypatch.setattr(local_mod.subprocess, "run", fake_run)
+    assert local_mod._run_dialog() == "D:\फ़ोटो"
+    assert seen["command"][1] == "-I"
+    assert seen["encoding"] == "utf-8"
+    assert seen["env"]["PYTHONIOENCODING"] == "utf-8"
+
+
+def test_an_ipv6_bind_prints_a_real_url():
+    from data_factory.cli.main import _url_host
+
+    assert _url_host("::1") == "[::1]"
+    assert _url_host("127.0.0.1") == "localhost"
+
+
+def test_a_folder_walk_does_not_follow_links_and_stops(tmp_path):
+    from data_factory.core import fs
+
+    root = tmp_path / "set"
+    make_image(root / "a.jpg", 1)
+    make_image(root / "sub" / "b.jpg", 2)
+    loop = root / "loop"
+    try:
+        import _winapi
+
+        _winapi.CreateJunction(str(root), str(loop))
+    except ImportError:
+        loop.symlink_to(root, target_is_directory=True)
+    assert [p.name for p in fs.walk_images(root, limit=100)] == ["a.jpg", "b.jpg"]
+    with pytest.raises(fs.TooManyFiles):
+        fs.walk_images(root, limit=2)

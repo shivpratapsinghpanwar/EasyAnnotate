@@ -175,3 +175,7 @@ def _no_real_tools(monkeypatch, tmp_path_factory):
     name the fake one explicitly.
     """
     monkeypatch.setenv("DATAFACTORY_TOOLS_HOME", str(tmp_path_factory.mktemp("no-tools")))
+    # The launchers write these straight into os.environ; recorded as absent
+    # here, pytest removes whatever a test's launcher left behind.
+    monkeypatch.delenv("EASYANNOTATE_LOCAL_TOKEN", raising=False)
+    monkeypatch.delenv("EASYANNOTATE_LOOPBACK", raising=False)

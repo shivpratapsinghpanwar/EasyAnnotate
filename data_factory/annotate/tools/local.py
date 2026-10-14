@@ -87,7 +87,7 @@ class SidecarClient:
             self._spawn_locked()
 
     def _spawn_locked(self) -> None:
-        environment = {**os.environ, **(self.env or {})}
+        environment = {**child_environment(), **(self.env or {})}
         # Unbuffered, or the child's replies sit in a pipe buffer and every
         # call looks like a timeout.
         environment["PYTHONUNBUFFERED"] = "1"
@@ -331,6 +331,18 @@ class LocalTool:
 
     def close(self) -> None:
         self.client.close()
+
+
+#: This server's secrets. No child needs them, and the children -- the
+#: sidecar, a training run, the installer -- run third-party code.
+PRIVATE_ENV = frozenset({"EASYANNOTATE_LOCAL_TOKEN", "DATAFACTORY_API_KEY"})
+
+
+def child_environment(**extra: str) -> dict[str, str]:
+    """This process's environment minus its secrets, plus ``extra``."""
+    environment = {key: value for key, value in os.environ.items() if key not in PRIVATE_ENV}
+    environment.update(extra)
+    return environment
 
 
 def python_for_tools() -> str:

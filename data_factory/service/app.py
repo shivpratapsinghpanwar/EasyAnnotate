@@ -107,6 +107,8 @@ app.include_router(local_router.router)
 # Before anything reads a body. See limits.py for why the handler's own byte
 # count could never do this.
 app.add_middleware(BodyLimit, limit=MAX_UPLOAD)
+# Outermost: a request that names another host never reaches a route.
+app.add_middleware(local_router.LocalHostFence)
 
 _origins = [o.strip() for o in os.environ.get("DATAFACTORY_ORIGINS", "").split(",") if o.strip()]
 if _origins:
@@ -128,7 +130,7 @@ async def require_key(x_api_key: str = Header(default="")) -> None:
     """
     if not API_KEY:
         return
-    if not secrets.compare_digest(x_api_key, API_KEY):
+    if not x_api_key.isascii() or not secrets.compare_digest(x_api_key, API_KEY):
         raise HTTPException(401, "invalid or missing X-API-Key")
 
 

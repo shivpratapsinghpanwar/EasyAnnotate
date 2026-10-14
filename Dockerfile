@@ -38,6 +38,7 @@ RUN useradd --create-home --uid 10001 datafactory
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     DATAFACTORY_WORKSPACE=/data/workspaces \
+    DATAFACTORY_ALLOW_ATTACHED=0 \
     PIP_NO_CACHE_DIR=1
 
 COPY --from=build /dist/*.whl /tmp/dist/
