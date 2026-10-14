@@ -292,6 +292,13 @@ def merge(store: Store, project: Project, source_idx: int, target_idx: int) -> i
         raise StoreError(f"{target.name!r} is retired; restore it before merging into it")
 
     now = time.time()
+    affected = [
+        row["image_id"]
+        for row in store.query(
+            "SELECT DISTINCT image_id FROM shape WHERE project_id = ? AND label_idx = ?",
+            (project.id, source.idx),
+        )
+    ]
     with store.write() as conn:
         moved = conn.execute(
             "UPDATE shape SET label_idx = ? WHERE project_id = ? AND label_idx = ?",
@@ -302,6 +309,13 @@ def merge(store: Store, project: Project, source_idx: int, target_idx: int) -> i
             (now, project.id, source.idx),
         )
         touch(conn, project.id)
+    # Two predictions that were "Close" and "close" were a class conflict;
+    # merged, they are not. The review order has to know.
+    from . import images as images_mod
+    from . import shapes as shapes_mod
+
+    for image_id in affected:
+        shapes_mod.refresh_uncertainty(store, project, images_mod.get(store, project, image_id))
     return int(moved)
 
 

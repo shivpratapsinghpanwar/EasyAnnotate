@@ -173,14 +173,20 @@ class SidecarClient:
                 # A tool that misses its deadline is not trustworthy
                 # afterwards: whatever it is still doing is unknown, and a late
                 # reply would arrive against an id nobody is waiting for.
-                # Restarting is the honest recovery.
-                self._kill_child()
+                # Restarting is the honest recovery -- except for health,
+                # which is only a question: a busy sidecar is not a broken one,
+                # and killing it on a status probe threw away loaded models.
+                if method != "health":
+                    self._kill_child()
                 # The sidecar's own last words are the only clue there is.
                 tail = self._stderr_tail()
                 raise ToolError(
                     f"{method} took longer than {wait:g}s" + (f" -- sidecar said: {tail}" if tail else ""),
                     code="timeout",
                 ) from None
+            # A child that answered is working: its restart budget is earned
+            # back, so three crashes over a day do not disable the tools.
+            self._restarts = 0
             return raise_for(reply)
 
         raise last or ToolUnavailable("the tool could not be reached")
@@ -318,7 +324,10 @@ class LocalTool:
                                      "source": str(source) if source else None})
 
     def invoke(self, name: str, payload: dict[str, Any]) -> dict[str, Any]:
-        return self.client.call("invoke", {"tool": name, **payload})
+        # The route's tool name last, so nothing in the payload can replace
+        # it. It used to come first: a request to an allowed tool carrying
+        # params.tool="detect.model" ran the model-file loader over HTTP.
+        return self.client.call("invoke", {**payload, "tool": name})
 
     def close(self) -> None:
         self.client.close()

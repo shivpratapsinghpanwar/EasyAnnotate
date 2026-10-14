@@ -278,7 +278,11 @@ def save(
                 row_origin = origin
                 if origin == "human" and shape.confidence is not None:
                     row_origin = "model"
-                    model_inserts += 1
+                    # Only a shape the server has never seen is a new
+                    # prediction. One coming back under an old id is an undone
+                    # delete: it was counted when it first arrived.
+                    if shape_id is None:
+                        model_inserts += 1
                 conn.execute(
                     "INSERT INTO shape (id, image_id, project_id, label_idx, xmin,"
                     " ymin, xmax, ymax, polygon, origin, confidence, pose, truncated,"
@@ -344,14 +348,24 @@ def uncertainty_of(stored: list[StoredShape]) -> float:
     class confusion is the commonest systematic error and the most
     expensive one to train on.
     """
-    live = [s for s in stored if s.is_model and not s.is_touched]
+    return score_rows(
+        (s.label_idx, *s.shape.bbox, s.shape.confidence)
+        for s in stored
+        if s.is_model and not s.is_touched
+    )
+
+
+def score_rows(rows) -> float:
+    """The score from bare (label_idx, x1, y1, x2, y2, confidence) rows --
+    shared with the migration that backfills it."""
+    live = [tuple(r) for r in rows]
     score = 0.0
-    for s in live:
-        if s.shape.confidence is not None:
-            score += 1.0 - abs(2.0 * float(s.shape.confidence) - 1.0)
+    for row in live:
+        if row[5] is not None:
+            score += 1.0 - abs(2.0 * float(row[5]) - 1.0)
     for i, a in enumerate(live):
         for b in live[i + 1:]:
-            if a.label_idx != b.label_idx and _iou(a.shape.bbox, b.shape.bbox) > CONFLICT_IOU:
+            if a[0] != b[0] and _iou(a[1:5], b[1:5]) > CONFLICT_IOU:
                 score += 1.0
     return round(score, 4)
 

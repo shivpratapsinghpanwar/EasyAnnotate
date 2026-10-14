@@ -49,7 +49,9 @@ EPOCH_PREFIX = "EASYANNOTATE_EPOCH "
 RESULT_PREFIX = "EASYANNOTATE_RESULT "
 #: A newer model replaces an older one's untouched guesses on "predicted"
 #: images too -- that is what each turn of the loop is for.
-UNREVIEWED = ("todo", "predicted", "in_progress")
+#: Not "in_progress": someone is working on those, and predictions dropped on
+#: top of their boxes would not even appear in the review queue.
+UNREVIEWED = ("todo", "predicted")
 
 
 class LoopError(StoreError):
@@ -107,6 +109,7 @@ def predict(
             offset += 5000
 
     predicted = shapes_total = failed = 0
+    first_error = ""
     touched: list[str] = []
     started = time.time()
     for index, image in enumerate(targets):
@@ -129,8 +132,10 @@ def predict(
                 },
                 budget_s=600.0,
             )
-        except Exception:
+        except Exception as exc:
             failed += 1
+            if not first_error:
+                first_error = f"{image.name}: {exc}"
             continue
         made = shapes_from_result(raw, "", image.width, image.height)
         review.set_predictions(store, project, image, made)
@@ -145,6 +150,7 @@ def predict(
         "predicted": predicted,
         "shapes": shapes_total,
         "failed": failed,
+        "first_error": first_error,
         "seconds": round(time.time() - started, 1),
         "agreement": shapes_mod.agreement(store, project),
     }
@@ -216,15 +222,25 @@ def train(
                 env=env,
             )
             assert process.stdout is not None
-            for line in process.stdout:
-                log.write(line)
-                line = line.rstrip()
-                tail = (tail + [line])[-15:]
-                if line.startswith(EPOCH_PREFIX):
-                    on_line(line[len(EPOCH_PREFIX):])
-                elif line.startswith(RESULT_PREFIX):
-                    result = json.loads(line[len(RESULT_PREFIX):])
-            code = process.wait()
+            try:
+                for line in process.stdout:
+                    log.write(line)
+                    line = line.rstrip()
+                    tail = (tail + [line])[-15:]
+                    if line.startswith(EPOCH_PREFIX):
+                        on_line(line[len(EPOCH_PREFIX):])
+                    elif line.startswith(RESULT_PREFIX):
+                        try:
+                            result = json.loads(line[len(RESULT_PREFIX):])
+                        except ValueError:
+                            result = None
+                code = process.wait()
+            finally:
+                # Never leave a trainer running behind us -- the temporary
+                # dataset it reads is about to be deleted.
+                if process.poll() is None:
+                    process.kill()
+                    process.wait()
         if code != 0 or result is None:
             raise LoopError(
                 f"training failed (exit {code}); full log: {log_path}\n" + "\n".join(tail[-8:])

@@ -44,8 +44,11 @@ PROTOCOL_VERSION = 1
 #: How long each method may take before the caller gives up. Encoding an image
 #: is genuinely slow; answering a click is not, and a slow one is a bug.
 DEFAULT_TIMEOUTS = {
-    "describe": 5.0,
-    "health": 5.0,
+    # Generous: a sidecar answers one request at a time, and a native model
+    # load can hold the GIL for tens of seconds. A short health timeout used
+    # to kill a perfectly busy sidecar.
+    "describe": 30.0,
+    "health": 30.0,
     "prepare": 30.0,
     # A tool replies promptly or says not_ready -- except that a native model
     # load (torch.jit.load of CLIP's 338 MB) can hold the GIL for tens of

@@ -366,6 +366,14 @@ def _import_existing(
             notes.append(f"{image.rel_path}: {exc}")
             continue
         images_mod.set_state(store, project, image, "predicted" if from_model else "reviewed")
+        if from_model:
+            # Counted, so deleting one of these later registers as a
+            # correction in the agreement figure rather than vanishing.
+            with store.write() as conn:
+                conn.execute(
+                    "UPDATE image SET predicted_count = ? WHERE id = ?",
+                    (len(annotation.shapes), image.id),
+                )
         imported += len(annotation.shapes)
         matched += 1
 

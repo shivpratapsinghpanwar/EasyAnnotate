@@ -1273,6 +1273,8 @@ class Editor {
   // Shown only to the person at this computer with the AI tools installed:
   // training starts processes and writes models, which no web page may ask.
   async showModelPanel() {
+    // No token: not opened from this computer, so not even worth the request.
+    if (!this.api.localToken()) return;
     let state;
     try {
       state = await this.api.local("/tools");
@@ -1446,7 +1448,7 @@ class Editor {
     await this.flushSave();
     this.say(`finding "${text}" on every unreviewed image…`);
     try {
-      const job = await this.api.runToolBatch(this.projectId, tool.name, { params: { text }, states: ["todo", "in_progress"] });
+      const job = await this.api.runToolBatch(this.projectId, tool.name, { params: { text }, states: ["todo"] });
       let status = job;
       while (!["finished", "failed", "cancelled"].includes(status.state)) {
         await pause(800);

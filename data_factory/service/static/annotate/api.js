@@ -160,16 +160,19 @@ export class Api {
     return this.get(`/api/projects/${projectId}/summary`);
   }
 
-  // The local link's routes: the token this tab was opened with, as a header.
-  local(path, body) {
-    let token = "";
+  // The token a launcher opened this tab with; empty in any other tab.
+  localToken() {
     try {
-      token = sessionStorage.getItem("easyannotate:local-token") || "";
+      return sessionStorage.getItem("easyannotate:local-token") || "";
     } catch {
-      token = "";
+      return "";
     }
+  }
+
+  // The local link's routes, with that token as a header.
+  local(path, body) {
     return this.request(body === undefined ? "GET" : "POST", `/api/local${path}`, body, {
-      "X-Local-Token": token,
+      "X-Local-Token": this.localToken(),
     });
   }
 

@@ -32,7 +32,7 @@ DEFAULT_MIN_CONFIDENCE = 0.15
 MAX_DETECTIONS = 300
 #: How long one request waits for its answer before replying not_ready and
 #: letting the work continue. Under the wire's 15s invoke timeout, with room.
-INLINE_WAIT_S = 8.0
+INLINE_WAIT_S = 2.5
 #: Finished answers are kept this long for the retry that collects them.
 RESULT_TTL_S = 600.0
 
@@ -479,7 +479,8 @@ def models_dir() -> Path:
 def _request_key(name: str, path: Path, params: dict[str, Any]) -> str:
     """The same request, asked again, is the same work: the retry that follows
     a not_ready must find what the first call started."""
-    prompt = {k: v for k, v in params.items() if k in ("box", "points", "text", "min_confidence")}
+    prompt = {k: v for k, v in params.items()
+              if k in ("box", "points", "text", "min_confidence", "model", "conf")}
     try:
         stamp = path.stat().st_mtime_ns
     except OSError:

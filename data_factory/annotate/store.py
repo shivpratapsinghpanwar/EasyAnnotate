@@ -32,7 +32,7 @@ from pathlib import Path
 from typing import Any
 
 #: Bumped when a rung is added to ``MIGRATIONS``.
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 #: The version-1 DDL lives beside this module rather than in a string, so it can
 #: be read, diffed and run through a SQLite client directly.
@@ -237,8 +237,33 @@ def _to_v5(conn: sqlite3.Connection, target: int) -> None:
     )
 
 
+def _to_v6(conn: sqlite3.Connection, target: int) -> None:
+    """Score every image that already had predictions before v5.
+
+    v5 added the column at 0 and left it there, so a project's existing
+    predictions sorted in file order under "least sure first" until each
+    image happened to be saved again.
+    """
+    from .shapes import score_rows
+
+    with conn:
+        conn.execute("BEGIN IMMEDIATE")
+        rows = conn.execute(
+            "SELECT image_id, label_idx, xmin, ymin, xmax, ymax, confidence FROM shape"
+            " WHERE origin = 'model' AND edited_at IS NULL"
+        ).fetchall()
+        by_image: dict[str, list] = {}
+        for row in rows:
+            by_image.setdefault(row[0], []).append(row[1:])
+        conn.executemany(
+            "UPDATE image SET uncertainty = ? WHERE id = ?",
+            [(score_rows(items), image_id) for image_id, items in by_image.items()],
+        )
+        conn.execute(f"PRAGMA user_version={int(target)}")
+
+
 #: Rung *n* migrates a database at version *n* to version *n+1*.
-MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4, _to_v5]
+MIGRATIONS = [_to_v1, _to_v2, _to_v3, _to_v4, _to_v5, _to_v6]
 
 
 def open_store(root: Path | str) -> Store:

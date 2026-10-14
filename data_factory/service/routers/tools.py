@@ -93,6 +93,7 @@ def invoke_tool_batch(
     if name not in {spec.name for spec in REGISTRY.available()}:
         raise HTTPException(404, f"no tool called {name!r} is installed")
     _refuse_local_only(name)
+    _refuse_reserved(body.params)
 
     targets: list[Any] = []
     for state in wanted:
@@ -158,6 +159,18 @@ def _invoke_patiently(name: str, payload: dict[str, Any]) -> Any:
         return None
 
 
+#: Keys the server sets itself. A client's copy is refused, not overwritten:
+#: a request that tries to name the tool, a model file or an image path is
+#: not a mistake worth tolerating.
+RESERVED_PARAMS = frozenset({"tool", "model", "source", "image_path", "image_id", "width", "height"})
+
+
+def _refuse_reserved(params: dict[str, Any]) -> None:
+    clash = sorted(RESERVED_PARAMS.intersection(params))
+    if clash:
+        raise HTTPException(400, f"these are set by the server, not the request: {', '.join(clash)}")
+
+
 def _refuse_local_only(name: str) -> None:
     """A "model" tool loads a model file, and a model file is code: loading a
     .pt unpickles it. Over HTTP that would let a client name any file to run
@@ -190,6 +203,8 @@ def prepare_tool(
     never be something the person sees.
     """
     _refuse_local_only(name)
+    if REGISTRY.spec(name) is None:
+        raise HTTPException(404, f"no tool called {name!r} is installed")
     try:
         project = projects_mod.get(store, project_id, owner)
         image = images_mod.get(store, project, body.image_id)
@@ -223,6 +238,7 @@ def invoke_tool(
     draggable vertices. See ``annotate/tools/postprocess.py``.
     """
     _refuse_local_only(name)
+    _refuse_reserved(body.params)
     try:
         project = projects_mod.get(store, project_id, owner)
         image = images_mod.get(store, project, body.image_id)

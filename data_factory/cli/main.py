@@ -537,17 +537,22 @@ def _progress_line(out: TextIO):
     return report
 
 
-def _summarise_predictions(report: dict, project, out: TextIO) -> None:
+def _summarise_predictions(report: dict, project, out: TextIO) -> int:
     out.write(
         f"  {report['shapes']} prediction(s) on {report['predicted']} of {report['images']} "
         f"unreviewed image(s) in {report['seconds']}s"
         + (f"; {report['failed']} failed" if report["failed"] else "")
         + "\n"
     )
+    if report.get("first_error"):
+        out.write(f"  first failure: {report['first_error']}\n")
+    if report["predicted"] == 0 and report["failed"]:
+        return 1
     out.write(
         "  review them hardest first: open the editor and pick\n"
         "  'predicted, least sure first' in the image list.\n"
     )
+    return 0
 
 
 def _cmd_predict(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
@@ -567,8 +572,7 @@ def _cmd_predict(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     except loop.LoopError as exc:
         err.write(f"{exc}\n")
         return 1
-    _summarise_predictions(report, project, out)
-    return 0
+    return _summarise_predictions(report, project, out)
 
 
 def _cmd_train(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
@@ -603,8 +607,7 @@ def _cmd_train(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     except loop.LoopError as exc:
         err.write(f"{exc}\n")
         return 1
-    _summarise_predictions(report, project, out)
-    return 0
+    return _summarise_predictions(report, project, out)
 
 
 def _cmd_app(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
