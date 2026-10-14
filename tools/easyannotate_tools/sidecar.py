@@ -139,11 +139,24 @@ class _Lazy:
             return "loading" if self._thread else "cold"
 
 
+def _profile() -> dict[str, Any]:
+    """What `easyannotate tools install` chose for this machine: device and
+    model sizes. Absent, the defaults are the small CPU-friendly models."""
+    home = Path(os.environ.get("DATAFACTORY_TOOLS_HOME") or Path.home() / ".datafactory" / "tools")
+    try:
+        return json.loads((home / "profile.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+
+
 def _device() -> str:
     try:
         import torch
 
-        return "cuda" if torch.cuda.is_available() else "cpu"
+        wanted = _profile().get("device", "")
+        if wanted == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            return "mps"
+        return "cuda" if torch.cuda.is_available() and wanted != "cpu" else "cpu"
     except Exception:
         return "cpu"
 
@@ -152,7 +165,7 @@ def _load_sam() -> Any:
     import numpy as np
     from ultralytics import SAM
 
-    model = SAM(SAM_WEIGHTS)
+    model = SAM(_profile().get("sam") or SAM_WEIGHTS)
     # Build the predictor once, on a tiny dummy image. After this the sidecar
     # only ever uses predictor.set_image + prompt calls: a full model.predict
     # on anything replaces the cached image features (measured: the next
@@ -164,7 +177,7 @@ def _load_sam() -> Any:
 def _load_world() -> Any:
     from ultralytics import YOLOWorld
 
-    model = YOLOWorld(WORLD_WEIGHTS)
+    model = YOLOWorld(_profile().get("world") or WORLD_WEIGHTS)
     # The first set_classes installs and loads CLIP: a 338 MB download and a
     # torch.jit.load that holds the GIL for seconds. Doing it here, on the
     # loader thread, means it happens once while the tool reports "loading",
@@ -208,7 +221,17 @@ class SidecarTool:
     # -- protocol ----------------------------------------------------------
 
     def describe(self) -> list[dict[str, Any]]:
-        return [spec.as_dict() for spec in SPECS]
+        # Report the model sizes actually in use, from the install profile.
+        profile = _profile()
+        specs = []
+        for spec in SPECS:
+            entry = spec.as_dict()
+            if spec.name.startswith("sam."):
+                entry["version"] = Path(profile.get("sam") or SAM_WEIGHTS).stem
+            elif spec.name == "detect.text":
+                entry["version"] = Path(profile.get("world") or WORLD_WEIGHTS).stem
+            specs.append(entry)
+        return specs
 
     def health(self, params: dict[str, Any]) -> dict[str, Any]:
         name = str(params.get("tool") or "")

@@ -43,7 +43,7 @@ from pydantic import BaseModel
 from ...annotate import attach
 from ...annotate import projects as projects_mod
 from ...annotate.store import StoreError
-from ..deps import get_store
+from ..deps import get_store, jobs_manager, media_root
 
 TOKEN_ENV = "EASYANNOTATE_LOCAL_TOKEN"
 LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -116,6 +116,169 @@ def pick(store=Depends(get_store)) -> dict[str, Any]:
     if not chosen:
         return {"cancelled": True}
     return _opened(store, Path(chosen))
+
+
+# --------------------------------------------------------------- AI tools
+#
+# Installing software and training models are things only the person at this
+# computer may start, so they sit behind the same fences as opening folders.
+# None of them takes a path or a model file from the page: the installer
+# chooses for the hardware, and training and prediction use the project's own
+# latest model, found on the server.
+
+class InstallIn(BaseModel):
+    device: str | None = None   # "cpu" to skip the GPU build; None: detect
+
+
+class LoopIn(BaseModel):
+    project: str
+    epochs: int = 30
+    predict: bool = True
+
+
+_running: dict[str, str] = {}   # what -> job id, so a second click joins the first
+
+
+def _job_running(kind: str) -> dict[str, Any] | None:
+    jobs = jobs_manager()
+    job_id = _running.get(kind)
+    job = jobs.get(job_id) if (jobs and job_id) else None
+    if job is not None and job.state in ("queued", "running"):
+        return job.as_dict()
+    return None
+
+
+def _source_checkout() -> Path | None:
+    """Running from a clone: install the tools from it, not from PyPI."""
+    root = Path(__file__).resolve().parents[3]
+    return root if (root / "tools" / "pyproject.toml").is_file() else None
+
+
+@router.get("/tools", dependencies=[Depends(require_local)])
+def tools_state() -> dict[str, Any]:
+    from ...annotate.tools import install as installer
+
+    return {**installer.status(), "job": _job_running("install")}
+
+
+@router.post("/tools/install", dependencies=[Depends(require_local)])
+def tools_install(body: InstallIn) -> dict[str, Any]:
+    from ...annotate.tools import install as installer
+    from ...annotate.tools.registry import REGISTRY
+    from ...core.types import OpResult
+
+    if body.device not in (None, "cpu", "cuda", "mps"):
+        raise HTTPException(400, "device must be cpu, cuda or mps")
+    running = _job_running("install")
+    if running:
+        return running
+    jobs = jobs_manager()
+    if jobs is None:
+        raise HTTPException(503, "no job runner in this process")
+
+    def work(context) -> OpResult:
+        lines: list[str] = []
+
+        def on_line(line: str) -> None:
+            lines.append(line)
+            context.emit(len(lines), 0, line[-200:])
+
+        result = OpResult(op="tools.install")
+        try:
+            profile = installer.install(source=_source_checkout(), device=body.device, on_line=on_line)
+        except Exception as exc:
+            result.fail(str(exc))
+            result.data = {"log": lines[-40:]}
+            return result
+        REGISTRY.close()  # rediscover: the Assist panel appears on the next look
+        result.data = {"profile": profile, "log": lines[-40:]}
+        return result
+
+    job = jobs.submit(secrets.token_hex(8), "tools.install", "local", work)
+    _running["install"] = job.id
+    return job.as_dict()
+
+
+@router.post("/train", dependencies=[Depends(require_local)])
+def train_project(body: LoopIn, store=Depends(get_store)) -> dict[str, Any]:
+    """Train on the reviewed images, then predict the rest with the result."""
+    from ...annotate import loop
+    from ...core.types import OpResult
+
+    project = _project(store, body.project)
+    if not 1 <= body.epochs <= 500:
+        raise HTTPException(400, "epochs must be between 1 and 500")
+    running = _job_running("train")
+    if running:
+        return running
+    jobs = jobs_manager()
+    if jobs is None:
+        raise HTTPException(503, "no job runner in this process")
+
+    def work(context) -> OpResult:
+        result = OpResult(op="loop.train")
+        try:
+            trained = loop.train(
+                store, project, epochs=body.epochs,
+                on_line=lambda line: context.emit(0, 0, line[-200:]),
+            )
+            data: dict[str, Any] = {
+                "model": trained["model"].name,
+                "metrics": trained["metrics"],
+            }
+            if body.predict:
+                data["predicted"] = loop.predict(
+                    store, project, _image_root(project), trained["model"],
+                    on_progress=lambda done, total, name: context.emit(done, total, f"predicting {name}"),
+                )
+            result.data = data
+        except loop.LoopError as exc:
+            result.fail(str(exc))
+        return result
+
+    job = jobs.submit(secrets.token_hex(8), "loop.train", project.id, work)
+    _running["train"] = job.id
+    return job.as_dict()
+
+
+@router.post("/predict", dependencies=[Depends(require_local)])
+def predict_project(body: LoopIn, store=Depends(get_store)) -> dict[str, Any]:
+    """Predict the unreviewed images with the project's latest trained model."""
+    from ...annotate import loop
+    from ...core.types import OpResult
+
+    project = _project(store, body.project)
+    model = loop.latest_model(project)
+    if model is None:
+        raise HTTPException(409, "no model trained for this project yet -- train one first")
+    jobs = jobs_manager()
+    if jobs is None:
+        raise HTTPException(503, "no job runner in this process")
+
+    def work(context) -> OpResult:
+        result = OpResult(op="loop.predict")
+        try:
+            result.data = {"predicted": loop.predict(
+                store, project, _image_root(project), model,
+                on_progress=lambda done, total, name: context.emit(done, total, f"predicting {name}"),
+            ), "model": model.name}
+        except loop.LoopError as exc:
+            result.fail(str(exc))
+        return result
+
+    job = jobs.submit(secrets.token_hex(8), "loop.predict", project.id, work)
+    return job.as_dict()
+
+
+def _project(store, project_id: str):
+    try:
+        return projects_mod.get(store, project_id, "local")
+    except StoreError as exc:
+        raise HTTPException(404, str(exc)) from None
+
+
+def _image_root(project) -> Path:
+    return Path(project.root) if project.is_attached and project.root else media_root(project.id)
 
 
 def _opened(store, folder: Path) -> dict[str, Any]:

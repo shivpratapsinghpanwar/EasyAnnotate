@@ -35,8 +35,8 @@ export class Api {
     return headers;
   }
 
-  async request(method, path, body) {
-    const options = { method, headers: this.headers() };
+  async request(method, path, body, extraHeaders = {}) {
+    const options = { method, headers: { ...this.headers(), ...extraHeaders } };
     if (body !== undefined) {
       options.headers["Content-Type"] = "application/json";
       options.body = JSON.stringify(body);
@@ -158,6 +158,19 @@ export class Api {
 
   summary(projectId) {
     return this.get(`/api/projects/${projectId}/summary`);
+  }
+
+  // The local link's routes: the token this tab was opened with, as a header.
+  local(path, body) {
+    let token = "";
+    try {
+      token = sessionStorage.getItem("easyannotate:local-token") || "";
+    } catch {
+      token = "";
+    }
+    return this.request(body === undefined ? "GET" : "POST", `/api/local${path}`, body, {
+      "X-Local-Token": token,
+    });
   }
 
   prepareTool(projectId, name, imageId) {

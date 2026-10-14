@@ -310,6 +310,16 @@
       <button id="btn-predictions" style="width:100%">Load model predictions…</button>
       <input id="predictions-file" type="file" accept=".zip,.json" hidden>
     </div>
+    <!-- Your own model: train on what you reviewed, predict the rest. Local
+         only, and only once the AI tools are installed. -->
+    <div id="model" hidden style="padding:8px 10px;border-top:1px solid var(--line)">
+      <div class="panel-head" style="padding:0 0 6px;border:none">Your model</div>
+      <div style="display:flex;gap:6px">
+        <button id="btn-train" style="flex:1" title="Train on the reviewed images, then predict the rest">Train</button>
+        <button id="btn-predict" style="flex:1" title="Predict the unreviewed images with the latest model">Predict</button>
+      </div>
+      <div class="hint" id="model-state" style="border-top:none;padding:4px 0 0"></div>
+    </div>
     <div id="export" style="padding:8px 10px;border-top:1px solid var(--line)">
       <div style="display:flex;gap:6px">
         <select id="export-format" class="plain" title="Export format" style="flex:1">

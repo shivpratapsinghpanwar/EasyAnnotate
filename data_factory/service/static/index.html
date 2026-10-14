@@ -117,6 +117,20 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg);padding:.08em 
     </div>
   </div>
 
+  <!-- AI tools: never downloaded until asked. Local only, like the card above. -->
+  <div class="card hide" id="aiCard" style="margin-bottom:1.25rem">
+    <h2>AI tools</h2>
+    <p class="note" id="aiMachine" style="margin:0 0 .5rem"></p>
+    <p class="note" id="aiState" style="margin:0 0 .6rem"></p>
+    <div class="row">
+      <button class="primary" id="btnInstallAi">Install AI tools</button>
+      <label class="note" style="display:flex;gap:.35rem;align-items:center;white-space:nowrap">
+        <input type="checkbox" id="aiCpu"> CPU only
+      </label>
+    </div>
+    <pre id="aiLog" class="hide" style="max-height:9rem;overflow:auto;font-size:.75rem;margin:.6rem 0 0"></pre>
+  </div>
+
   <!-- upload -->
   <div class="card" id="uploadCard">
     <h2>1 &middot; Your dataset</h2>
@@ -368,6 +382,7 @@ async function enableLocal(){
   }
   if(!viaToken && !hasBridge()) return;
   $("openFolderCard").classList.remove("hide");
+  if(viaToken) showAiTools();
   // Typing a path needs the token; browsing needs the bridge or a dialog.
   $("folderPath").parentElement.querySelector("#btnOpenPath").classList.toggle("hide", !viaToken);
   $("folderPath").classList.toggle("hide", !viaToken);
@@ -408,6 +423,60 @@ $("btnOpenFolder").onclick = () => withBusy($("btnOpenFolder"), async () => {
     goTo(await localApi("/pick", {}));
   }
 });
+
+// The heavy half, on request: what this machine would get, then the download.
+async function showAiTools(){
+  let state;
+  try{ state = await localApi("/tools"); }catch(e){ return; }
+  $("aiCard").classList.remove("hide");
+  const plan = state.plan || {};
+  $("aiMachine").textContent = `This computer: ${plan.summary || "unknown"}` +
+    ((plan.warnings || []).length ? ` — ${plan.warnings.join(" ")}` : "");
+  const button = $("btnInstallAi");
+  if(state.installed){
+    const profile = state.profile || {};
+    $("aiState").textContent = `Installed: ${profile.summary || ""} (PyTorch sees ${profile.verified_device || "?"}). ` +
+      "Open a project to use the Assist panel.";
+    button.textContent = "Reinstall";
+  }else{
+    $("aiState").textContent = `Not installed. About ${plan.download_gb || "?"} GB, into a separate ` +
+      "environment -- the editor works the same without it.";
+  }
+  if(state.job) watchInstall(state.job.id);
+}
+
+$("btnInstallAi").onclick = () => withBusy($("btnInstallAi"), async () => {
+  const job = await localApi("/tools/install", {device: $("aiCpu").checked ? "cpu" : null});
+  watchInstall(job.id);
+});
+
+async function watchInstall(jobId){
+  const log = $("aiLog");
+  log.classList.remove("hide");
+  $("btnInstallAi").disabled = true;
+  try{
+    for(;;){
+      const job = await (await api(`/jobs/${jobId}`)).json();
+      const message = (job.progress || {}).message;
+      if(message && !log.textContent.endsWith(message)){
+        log.textContent += (log.textContent ? "\n" : "") + message;
+        log.scrollTop = log.scrollHeight;
+      }
+      if(["finished", "failed", "cancelled"].includes(job.state)){
+        const result = job.result || {};
+        if(job.state !== "finished" || result.ok === false){
+          $("aiState").textContent = "Install failed: " + ((result.errors || []).join("; ") || job.error || job.state);
+        }else{
+          await showAiTools();
+        }
+        break;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }finally{
+    $("btnInstallAi").disabled = false;
+  }
+}
 
 async function showRecent(){
   try{

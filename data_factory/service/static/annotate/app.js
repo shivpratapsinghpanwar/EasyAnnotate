@@ -181,6 +181,7 @@ class Editor {
       .tools()
       .then((payload) => this.assistPanel.setTools(payload))
       .catch(() => this.assistPanel.setTools({ tools: [] }));
+    this.showModelPanel();
 
     const resume = this.project.resume;
     const opening = resume ? this.openImage(resume.id) : null;
@@ -1130,6 +1131,8 @@ class Editor {
 
     document.getElementById("btn-accept").addEventListener("click", () => this.acceptAll());
     document.getElementById("btn-export").addEventListener("click", () => this.exportProject());
+    document.getElementById("btn-train").addEventListener("click", () => this.runLoop("train"));
+    document.getElementById("btn-predict").addEventListener("click", () => this.runLoop("predict"));
 
     const picker = document.getElementById("predictions-file");
     document.getElementById("btn-predictions").addEventListener("click", () => picker.click());
@@ -1262,6 +1265,59 @@ class Editor {
       else this.say("that was the last image");
     } catch (error) {
       this.say(describe(error));
+    }
+  }
+
+  // -- your model -----------------------------------------------------------
+
+  // Shown only to the person at this computer with the AI tools installed:
+  // training starts processes and writes models, which no web page may ask.
+  async showModelPanel() {
+    let state;
+    try {
+      state = await this.api.local("/tools");
+    } catch {
+      return;
+    }
+    if (!state.installed) return;
+    document.getElementById("model").hidden = false;
+    const profile = state.profile || {};
+    document.getElementById("model-state").textContent =
+      `on ${profile.verified_device || profile.device || "cpu"} · reviewed images train it`;
+  }
+
+  async runLoop(kind) {
+    await this.flushSave();
+    const button = document.getElementById(kind === "train" ? "btn-train" : "btn-predict");
+    button.disabled = true;
+    const state = document.getElementById("model-state");
+    try {
+      const job = await this.api.local(`/${kind}`, { project: this.projectId, epochs: 30 });
+      let status = job;
+      while (!["finished", "failed", "cancelled"].includes(status.state)) {
+        await pause(1000);
+        status = await this.api.job(job.id);
+        const progress = status.progress || {};
+        if (progress.message) state.textContent = progress.message;
+      }
+      const result = status.result || {};
+      if (status.state !== "finished" || result.ok === false) {
+        state.textContent = `${kind} failed: ${(result.errors || []).join("; ") || status.error || status.state}`;
+        return;
+      }
+      const data = result.data || {};
+      const predicted = data.predicted || {};
+      const score = (data.metrics || {})["metrics/mAP50(B)"];
+      state.textContent =
+        (kind === "train" ? `trained ${data.model}${score != null ? ` (mAP50 ${score.toFixed(2)})` : ""}; ` : "") +
+        `${predicted.shapes ?? 0} prediction(s) on ${predicted.predicted ?? 0} image(s)`;
+      await this.loadImageList();
+      if (this.image) await this.openImage(this.image.id);
+      this.say("review them hardest first: pick 'predicted, least sure first' in the image list");
+    } catch (error) {
+      state.textContent = describe(error);
+    } finally {
+      button.disabled = false;
     }
   }
 

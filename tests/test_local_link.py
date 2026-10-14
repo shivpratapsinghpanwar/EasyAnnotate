@@ -137,3 +137,86 @@ def test_the_launcher_mints_a_token_for_this_machine(monkeypatch):
     import os
 
     assert os.environ["EASYANNOTATE_LOCAL_TOKEN"] == fragment.split("=", 1)[1]
+
+
+# ------------------------------------------------------- AI tools and training
+
+
+def _wait(client, job_id, seconds=60):
+    import time
+
+    deadline = time.time() + seconds
+    job = client.get(f"/api/jobs/{job_id}").json()
+    while job["state"] not in ("finished", "failed", "cancelled") and time.time() < deadline:
+        time.sleep(0.1)
+        job = client.get(f"/api/jobs/{job_id}").json()
+    return job
+
+
+@pytest.mark.parametrize("method,path,body", [
+    ("GET", "/api/local/tools", None),
+    ("POST", "/api/local/tools/install", {}),
+    ("POST", "/api/local/train", {"project": "0" * 32}),
+    ("POST", "/api/local/predict", {"project": "0" * 32}),
+])
+def test_installing_and_training_are_local_only(local, method, path, body):
+    """They download software and start processes: never for a web page."""
+    assert local.request(method, path, json=body).status_code == 403
+    assert local.request(method, path, json=body, headers={"X-Local-Token": "nope"}).status_code == 403
+
+
+def test_the_tools_card_reports_this_machine(local):
+    state = local.get("/api/local/tools", headers=ok_headers()).json()
+    assert state["plan"]["device"] in ("cuda", "mps", "cpu")
+    assert state["plan"]["summary"]
+    assert "ram_gb" in state["hardware"]
+
+
+def test_install_runs_as_one_job_and_a_second_click_joins_it(local, monkeypatch):
+    import threading
+
+    from data_factory.annotate.tools import install as installer
+
+    release = threading.Event()
+    calls = []
+
+    def fake_install(*, source=None, device=None, on_line=print):
+        calls.append(device)
+        on_line("plan: pretend")
+        release.wait(10)
+        on_line("done: pretend")
+        return {"device": "cpu", "summary": "pretend", "verified_device": "cpu"}
+
+    monkeypatch.setattr(installer, "install", fake_install)
+    first = local.post("/api/local/tools/install", json={"device": "cpu"}, headers=ok_headers()).json()
+    second = local.post("/api/local/tools/install", json={}, headers=ok_headers()).json()
+    assert second["id"] == first["id"]  # joined, not started twice
+    release.set()
+    job = _wait(local, first["id"])
+    assert job["state"] == "finished" and job["result"]["data"]["profile"]["summary"] == "pretend"
+    assert calls == ["cpu"]
+    assert local.post("/api/local/tools/install", json={"device": "tpu"}, headers=ok_headers()).status_code == 400
+
+
+def test_training_from_the_page_trains_on_reviewed_work(local, folder, tmp_path, monkeypatch):
+    import os
+    import sys
+    from pathlib import Path
+
+    monkeypatch.setenv("EASYANNOTATE_MODELS", str(tmp_path / "models"))
+    monkeypatch.setenv("EASYANNOTATE_TRAIN_MODULE", "fake_trainer")
+    monkeypatch.setenv("DATAFACTORY_TOOLS_PYTHON", sys.executable)
+    tests_dir = str(Path(__file__).resolve().parent)
+    monkeypatch.setenv("PYTHONPATH", tests_dir + os.pathsep + os.environ.get("PYTHONPATH", ""))
+
+    project = local.post("/api/local/open", json={"path": str(folder)}, headers=ok_headers()).json()["project"]
+    assert local.post("/api/local/predict", json={"project": project}, headers=ok_headers()).status_code == 409
+
+    job = local.post("/api/local/train", json={"project": project, "epochs": 2, "predict": False},
+                     headers=ok_headers()).json()
+    job = _wait(local, job["id"])
+    assert job["state"] == "finished", job
+    assert job["result"]["ok"], job["result"]
+    assert job["result"]["data"]["model"].endswith(".pt")
+    assert local.post("/api/local/train", json={"project": project, "epochs": 0},
+                      headers=ok_headers()).status_code == 400

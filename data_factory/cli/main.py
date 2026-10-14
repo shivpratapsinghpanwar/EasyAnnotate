@@ -134,7 +134,9 @@ def build_parser() -> argparse.ArgumentParser:
     install = tools_sub.add_parser(
         "install", help="make ~/.datafactory/tools and install easyannotate-tools into it"
     )
-    install.add_argument("--gpu", action="store_true", help="install the CUDA build of PyTorch")
+    install.add_argument("--gpu", action="store_true",
+                         help="require the GPU build (default: chosen from this machine's hardware)")
+    install.add_argument("--cpu", action="store_true", help="install for CPU even if there is a GPU")
     install.add_argument(
         "--source", help="install from this checkout instead of PyPI (for developers)"
     )
@@ -444,48 +446,43 @@ def _cmd_tools_help(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 
 
 def _cmd_tools_install(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
-    """A separate environment for the heavy tools, where torch's version
+    """A separate environment for the heavy tools, chosen for this machine --
+    the CUDA build its driver supports, Metal, or CPU -- where torch's version
     matrix is resolved on its own and can never break the editor's install."""
-    import shutil
-    import subprocess
+    from ..annotate.tools import install as installer
 
-    home = Path.home() / ".datafactory" / "tools"
-    python = home / ("Scripts/python.exe" if sys.platform == "win32" else "bin/python")
-    uv = shutil.which("uv")
-
-    def run(cmd: list[str]) -> int:
-        out.write("  $ " + " ".join(cmd) + "\n")
-        out.flush()
-        return subprocess.call(cmd)
-
-    if not python.is_file():
-        out.write(f"creating {home}\n")
-        code = run([uv, "venv", str(home)] if uv else [sys.executable, "-m", "venv", str(home)])
-        if code:
-            err.write("could not create the environment\n")
-            return code
-    pip = [uv, "pip", "install", "--python", str(python)] if uv else [str(python), "-m", "pip", "install"]
-
-    if args.gpu:
-        out.write("installing PyTorch with CUDA (large download)\n")
-        code = run(pip + ["torch", "torchvision", "--index-url", "https://download.pytorch.org/whl/cu124"])
-        if code:
-            return code
-    packages = (
-        ["-e", str(Path(args.source)), "-e", str(Path(args.source) / "tools")]
-        if args.source
-        else ["easyannotate-tools"]
-    )
-    out.write("installing easyannotate-tools (PyTorch and Ultralytics; several hundred MB)\n")
-    code = run(pip + packages)
-    if code:
-        return code
-    out.write(f"\ninstalled into {home}. Model weights download on first use.\n")
+    device = "cpu" if args.cpu else ("cuda" if args.gpu else None)
+    try:
+        installer.install(
+            source=Path(args.source).expanduser() if args.source else None,
+            device=device,
+            on_line=lambda line: (out.write(f"  {line}\n"), out.flush()),
+        )
+    except installer.InstallError as exc:
+        err.write(f"{exc}\n")
+        return 1
+    out.write("\nModel weights download on first use.\n")
     return _cmd_tools_status(args, out, err)
 
 
 def _cmd_tools_status(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
+    from ..annotate.tools import install as installer
     from ..annotate.tools.registry import REGISTRY
+
+    state = installer.status()
+    plan = state["plan"]
+    out.write(f"this machine: {plan['summary']}\n")
+    for warning in plan.get("warnings") or []:
+        out.write(f"  note: {warning}\n")
+    if state["installed"]:
+        profile = state["profile"]
+        out.write(
+            f"installed:    {profile.get('summary', '?')} "
+            f"(PyTorch sees {profile.get('verified_device', '?')})\n"
+        )
+    else:
+        out.write(f"installed:    no -- easyannotate tools install (about {plan['download_gb']:g} GB)\n")
+        return 1
 
     report = REGISTRY.as_dict()
     tools = report.get("tools") or []
