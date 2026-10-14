@@ -62,6 +62,10 @@ jobs:
       # half-overwritten module ("partially initialized module 'cv2'").
       - run: uv sync --extra dev --extra desktop
       - run: uv pip install pyinstaller
+      # Bundled into the app, with uv, so "Install AI tools" needs nothing of
+      # ours from PyPI. PyTorch still downloads on request, never here.
+      - run: uv build --wheel --out-dir build/wheels
+      - run: uv build --wheel --directory tools --out-dir ../build/wheels
       # pywebview's Linux backend wants GTK or Qt at build time for its hooks.
       - if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libgirepository1.0-dev gir1.2-webkit2-4.1 || true
@@ -77,6 +81,11 @@ jobs:
           for i in $(seq 1 60); do grep -q "interface" launch.log && break; sleep 1; done
           port=$(grep -o "127.0.0.1:[0-9]*" launch.log | head -1 | cut -d: -f2)
           curl -fs "http://127.0.0.1:$port/api/health"
+          # The local link and the AI-tools card: token in, install plan out.
+          # tr: Windows writes the log with CRLF, and a token ending in \r is refused.
+          token=$(grep -o "#token=[^ ]*" launch.log | head -1 | cut -d= -f2 | tr -d '\r')
+          curl -fs -H "X-Local-Token: $token" "http://127.0.0.1:$port/api/local/tools" | grep -q '"uv":true'
+          ls dist/EasyAnnotate/_internal/wheels/*.whl
           cat launch.log
       - shell: bash
         run: |

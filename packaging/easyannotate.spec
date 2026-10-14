@@ -6,7 +6,17 @@
 # Produces dist/EasyAnnotate/EasyAnnotate.exe (or the platform equivalent), which
 # launches the local server and opens a browser -- no Python needed on the
 # target machine.
+#
+# For "Install AI tools" to work in the built app, build the two wheels first:
+#
+#   uv build --wheel --out-dir build/wheels
+#   uv build --wheel --directory tools --out-dir ../build/wheels
+#
+# The app then carries uv (which fetches a Python for the tools environment)
+# and both wheels. PyTorch and the models are never bundled: they are the
+# gigabytes, and they download only when someone asks.
 
+import shutil
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules, copy_metadata
@@ -45,10 +55,24 @@ datas += collect_data_files("data_factory")
 # the frozen build reports 0.0.0+source from --version and /api/health.
 datas += copy_metadata("easyannotate")
 
+# What "Install AI tools" needs on a machine with no Python. Found at
+# sys._MEIPASS/bin and /wheels by data_factory.annotate.tools.install.
+binaries = []
+uv = shutil.which("uv")
+if uv:
+    binaries.append((uv, "bin"))
+else:
+    print("WARNING: uv not on PATH -- the built app cannot install the AI tools")
+wheels = sorted((ROOT / "build" / "wheels").glob("*.whl"))
+datas += [(str(wheel), "wheels") for wheel in wheels]
+if len(wheels) < 2:
+    print("WARNING: build/wheels lacks the easyannotate and easyannotate-tools wheels --"
+          " the built app will fetch them from PyPI instead")
+
 analysis = Analysis(
     [str(ROOT / "packaging" / "launcher.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hidden,
     hookspath=[],
