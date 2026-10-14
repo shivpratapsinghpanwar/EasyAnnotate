@@ -109,11 +109,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["data_factory"]
+packages = ["data_factory", "easyannotate"]
 
 [tool.hatch.build.targets.sdist]
 include = [
     "/data_factory",
+    "/easyannotate",
     "/tests",
     "/recipes",
     "/examples",

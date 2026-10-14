@@ -20,7 +20,10 @@ jobs:
         with:
           python-version: ${{ matrix.python }}
           enable-cache: true
-      - run: uv sync --all-extras
+      # Not --all-extras: the gui extra is the full opencv-python, which shares
+      # its cv2/ folder with the headless build, and the two together leave a
+      # half-overwritten module ("partially initialized module 'cv2'").
+      - run: uv sync --extra dev --extra desktop
       # The editor is the product, so its browser tests run in CI rather than
       # skipping when nobody installed a browser.
       - run: uv run python -m playwright install --with-deps chromium
@@ -28,7 +31,7 @@ jobs:
       - run: uv run python -m playwright install chromium
         if: runner.os == 'Windows'
       - run: uv run python -m pytest -o addopts= -q -p no:warnings
-      - run: uv run ruff check --select F data_factory tests
+      - run: uv run ruff check --select F data_factory easyannotate tests
 
   package:
     name: wheel installs and runs

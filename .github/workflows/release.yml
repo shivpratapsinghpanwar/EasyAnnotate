@@ -57,7 +57,10 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
-      - run: uv sync --all-extras
+      # Not --all-extras: the gui extra is the full opencv-python, which shares
+      # its cv2/ folder with the headless build, and the two together leave a
+      # half-overwritten module ("partially initialized module 'cv2'").
+      - run: uv sync --extra dev --extra desktop
       - run: uv pip install pyinstaller
       # pywebview's Linux backend wants GTK or Qt at build time for its hooks.
       - if: runner.os == 'Linux'

@@ -88,6 +88,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--port", type=int, default=8765, help="port to listen on")
     serve.add_argument("--workspace", help="where uploaded datasets are stored")
     serve.add_argument("--no-browser", action="store_true", help="do not open a browser")
+    serve.add_argument(
+        "--headless",
+        action="store_true",
+        help="for a remote or GPU machine: no browser, and print how to reach it "
+             "from your own (an SSH tunnel keeps it off the network)",
+    )
     serve.add_argument("--api-key", help="require this key in the X-API-Key header")
     serve.add_argument("--reload", action="store_true", help="auto-reload on code changes")
     serve.set_defaults(_handler=_cmd_serve)
@@ -297,6 +303,16 @@ def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         )
     out.write("Press Ctrl+C to stop.\n")
     out.flush()
+
+    if args.headless:
+        args.no_browser = True
+        out.write(
+            "headless: nothing opens here. From your own computer:\n"
+            f"    ssh -L {args.port}:localhost:{args.port} <this-machine>\n"
+            f"    then open http://localhost:{args.port}\n"
+            "The server stays bound to this machine; the tunnel carries the editor to you.\n"
+        )
+        out.flush()
 
     if not args.no_browser:
         import threading
