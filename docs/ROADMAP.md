@@ -9,21 +9,32 @@ A weighted scorecard (0–10 per dimension, weights sum to 100) against CVAT,
 Label Studio, Roboflow, X-AnyLabeling and Labelme. EasyAnnotate is scored on
 what runs today, not on what is designed.
 
-| Dimension (weight) | Now | Target | CVAT | Roboflow | X-AnyLabeling |
-|---|---|---|---|---|---|
-| Time to first box (8) | 9 | 10 | 3 | 7 | 7 |
-| Core editor (13) | 6 | 8 | 8 | 8 | 7 |
-| Annotation types (7) | 3 | 6 | 10 | 7 | 9 |
-| AI assist (13) | 2 | 8 | 8 | 9 | 10 |
-| Model-in-the-loop review (12) | 7 | 9 | 6 | 7 | 4 |
-| Data correctness & formats (10) | 8 | 9 | 8 | 9 | 8 |
-| Dataset prep & health (8) | 9 | 9 | 3 | 8 | 3 |
-| Performance at scale (6) | 5 | 7 | 7 | 7 | 6 |
-| Video (4) | 1 | 2 | 9 | 6 | 8 |
-| Collaboration (5) | 1 | 1 | 9 | 9 | 1 |
-| Privacy / local / cost (4) | 10 | 10 | 7 | 3 | 10 |
-| Maturity & distribution (10) | 1 | 6 | 10 | 10 | 8 |
-| **Total / 100** | **52** | **75** | **73** | **79** | **69** |
+| Dimension (weight) | Oct 2 | **Oct 14** | Target | CVAT | Roboflow | X-AnyLabeling |
+|---|---|---|---|---|---|---|
+| Time to first box (8) | 9 | **10** | 10 | 3 | 7 | 7 |
+| Core editor (13) | 6 | **8** | 8 | 8 | 8 | 7 |
+| Annotation types (7) | 3 | **5** | 6 | 10 | 7 | 9 |
+| AI assist (13) | 2 | **7** | 8 | 8 | 9 | 10 |
+| Model-in-the-loop review (12) | 7 | **9** | 9 | 6 | 7 | 4 |
+| Data correctness & formats (10) | 8 | **9** | 9 | 8 | 9 | 8 |
+| Dataset prep & health (8) | 9 | **9** | 9 | 3 | 8 | 3 |
+| Performance at scale (6) | 5 | **8** | 7 | 7 | 7 | 6 |
+| Video (4) | 1 | **1** | 2 | 9 | 6 | 8 |
+| Collaboration (5) | 1 | **1** | 1 | 9 | 9 | 1 |
+| Privacy / local / cost (4) | 10 | **10** | 10 | 7 | 3 | 10 |
+| Maturity & distribution (10) | 1 | **1** | 6 | 10 | 10 | 8 |
+| **Total / 100** | **52** | **≈69** | **75** | **73** | **79** | **69** |
+
+What is left, as arithmetic. **Maturity 1→6 is +5.0 and is the owner's four
+decisions**: push (so CI runs for the first time), publish both packages to
+PyPI, make the repo public, tag a release. That gives ≈74. Then any one of:
+image-level tags (types 5→6, +0.7) plus a GPU-verified, editor-started training
+run (AI 7→8, +1.3). AI is held at 7 because there is no SAM 3, no VLM, no
+video propagation, and the GPU path has never run -- only CPU torch.
+
+Competitor scores are unchanged from the first assessment and were judged, not
+tested. Ours are judged too, but on what was run: the AI timings, the training
+loop and the 20k gates are measured (see README, Performance).
 
 ## The position
 
