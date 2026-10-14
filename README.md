@@ -285,13 +285,23 @@ last one to see whether the loop is actually working.
 ### AI assist
 
 ```bash
-easyannotate tools install         # ~/.datafactory/tools: PyTorch, Ultralytics
-easyannotate tools install --gpu   # CUDA build of PyTorch first
-easyannotate tools status          # what the editor will find
+easyannotate tools install         # ~/.datafactory/tools, chosen for this machine
+easyannotate tools install --cpu   # skip the GPU build
+easyannotate tools status          # what this machine gets, and what is installed
 ```
 
 From a source checkout, before the first PyPI release:
-`easyannotate tools install --source .`
+`easyannotate tools install --source .` The desktop app has the same thing
+as an "Install AI tools" button.
+
+The installer reads the GPU, its memory and its driver. NVIDIA cards get the
+PyTorch CUDA build their driver was made for (12.8 or 12.6; PyTorch 2.7 with
+CUDA 11.8 for drivers older than 560), Apple silicon gets Metal, anything
+else the CPU build. Model sizes follow memory: SAM 2.1 base, small or tiny,
+YOLO-World large, medium or small. Then it runs real work on the device and
+believes only that: on an RTX 2050 with driver 529, PyTorch's CUDA 12.6
+build reported the GPU available and failed every allocation. Measured there
+on CUDA 11.8: SAM 0.044 s a click, a new text prompt about 1 s.
 
 Then the Assist panel appears in the editor:
 

@@ -37,7 +37,7 @@ M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
 binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
 text prompts, batch prompt → predictions, SAM encode-ahead), M4 (the loop:
 `easyannotate train/predict`, uncertainty-ordered review queue) and the
-rotated-box/line/point half of M5.** 777 tests pass, including 32 browser tests
+rotated-box/line/point half of M5.** 782 tests pass, including 32 browser tests
 (install playwright). `docs/bench_scale.py` measures 20k images: all gates pass.
 
 **Three front ends, as the owner asked (Oct 2026):** (1) the browser bound to

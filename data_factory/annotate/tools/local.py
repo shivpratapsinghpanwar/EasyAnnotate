@@ -347,6 +347,8 @@ PRIVATE_ENV = frozenset({"EASYANNOTATE_LOCAL_TOKEN", "DATAFACTORY_API_KEY"})
 def child_environment(**extra: str) -> dict[str, str]:
     """This process's environment minus its secrets, plus ``extra``."""
     environment = {key: value for key, value in os.environ.items() if key not in PRIVATE_ENV}
+    # So CUDA numbers GPUs as nvidia-smi does, and gpu_index means one card.
+    environment.setdefault("CUDA_DEVICE_ORDER", "PCI_BUS_ID")
     environment.update(extra)
     return environment
 

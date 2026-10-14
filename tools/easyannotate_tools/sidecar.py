@@ -158,12 +158,13 @@ def _device() -> str:
         wanted = profile.get("device", "")
         if wanted == "mps" and getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
             return "mps"
+        if wanted == "cpu" or not torch.cuda.is_available():
+            return "cpu"
         # The card the install verified and sized the models for -- not
-        # whichever CUDA happens to number 0.
-        if wanted == "cuda" and torch.cuda.is_available():
-            index = int(profile.get("gpu_index") or 0)
-            return f"cuda:{index}" if index else "cuda"
-        return "cpu"
+        # whichever CUDA happens to number 0. With no profile (the tools
+        # Python named by DATAFACTORY_TOOLS_PYTHON), the machine decides.
+        index = int(profile.get("gpu_index") or 0) if wanted == "cuda" else 0
+        return f"cuda:{index}" if index else "cuda"
     except Exception:
         return "cpu"
 
@@ -176,8 +177,9 @@ def _load_sam() -> Any:
     # Build the predictor once, on a tiny dummy image. After this the sidecar
     # only ever uses predictor.set_image + prompt calls: a full model.predict
     # on anything replaces the cached image features (measured: the next
-    # prompt then returns an empty mask), so it must never run again.
-    model.predict(np.zeros((64, 64, 3), np.uint8), bboxes=[[2, 2, 30, 30]], verbose=False)
+    # prompt then returns an empty mask), so it must never run again. The
+    # device here is where the predictor lives from then on.
+    model.predict(np.zeros((64, 64, 3), np.uint8), bboxes=[[2, 2, 30, 30]], device=_device(), verbose=False)
     return model
 
 
@@ -189,8 +191,20 @@ def _load_world() -> Any:
     # torch.jit.load that holds the GIL for seconds. Doing it here, on the
     # loader thread, means it happens once while the tool reports "loading",
     # not in the middle of somebody's first prompt.
-    model.set_classes(["object"])
+    _set_world_classes(model, ["object"])
     return model
+
+
+def _set_world_classes(model: Any, classes: list[str]) -> None:
+    # YOLOWorld.set_classes rebuilds CLIP (338 MB) from disk on every call:
+    # measured 6.5 s per new prompt on a GPU. Keep it loaded.
+    inner = getattr(model, "model", None)
+    if inner is not None and "cache_clip_model" in inspect.signature(inner.set_classes).parameters:
+        inner.set_classes(classes, cache_clip_model=True)
+        inner.names = list(classes)
+        model.predictor = None  # what set_classes does: rebuild with the new names
+    else:  # an Ultralytics without the flag
+        model.set_classes(classes)
 
 
 class _Pending:
@@ -443,15 +457,7 @@ class SidecarTool:
         # One prompt, or several separated by commas: "door, handle".
         classes = [part.strip() for part in text.split(",") if part.strip()]
         if classes != self._world_classes:
-            # YOLOWorld.set_classes rebuilds CLIP (338 MB) from disk on every
-            # call: measured 6.5 s per new prompt on a GPU. Keep it loaded.
-            inner = getattr(model, "model", None)
-            if inner is not None and "cache_clip_model" in inspect.signature(inner.set_classes).parameters:
-                inner.set_classes(classes, cache_clip_model=True)
-                inner.names = list(classes)
-                model.predictor = None  # what set_classes does: rebuild with the new names
-            else:  # an Ultralytics without the flag
-                model.set_classes(classes)
+            _set_world_classes(model, classes)
             self._world_classes = classes
         results = model.predict(
             str(path), device=_device(), conf=min_confidence, max_det=MAX_DETECTIONS, verbose=False

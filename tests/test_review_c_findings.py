@@ -130,10 +130,14 @@ def test_training_project_b_does_not_return_project_a_job(local, tmp_path, monke
     monkeypatch.setattr(loop, "train", slow_train)
     try:
         job_a = local.post("/api/local/train", json={"project": a, "predict": False}, headers=H).json()
-        job_b = local.post("/api/local/train", json={"project": b, "predict": False}, headers=H).json()
+        second = local.post("/api/local/train", json={"project": b, "predict": False}, headers=H)
     finally:
         release.set()
-    assert job_b["dataset"] == b, f"asked to train B, got A's job back: {job_b['id']} == {job_a['id']}"
+    # One training per machine (two on one GPU run out of memory), so B is
+    # refused, saying why -- never handed A's job as though it were B's.
+    assert second.status_code == 409, second.json()
+    assert "another project is training" in second.json()["detail"]
+    assert job_a["dataset"] == a
 
 
 # ----------------------------- 3. /predict has no guard: two clicks, two jobs

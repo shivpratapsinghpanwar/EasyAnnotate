@@ -60,9 +60,28 @@ class ToolRegistry:
         self._backend: Tool | None = backend
         self._resolved = backend is not None
         self._reason = ""
+        self._paused = ""
 
     # -- discovery ---------------------------------------------------------
+    def pause(self, reason: str) -> None:
+        """Stop the sidecar and start none until ``resume``.
+
+        For an install: the editor keeps asking (the tool list, a prepare on
+        every image), and each ask would start a sidecar from the very
+        environment being replaced -- importing torch, whose DLLs Windows
+        then refuses to let the installer overwrite.
+        """
+        self._paused = reason
+        self.close()
+
+    def resume(self) -> None:
+        self._paused = ""
+        self.close()  # rediscover on the next look
+
     def backend(self) -> Tool:
+        if self._paused:
+            self._reason = self._paused
+            return NullTool()
         if not self._resolved:
             self._backend = self._discover()
             self._resolved = True

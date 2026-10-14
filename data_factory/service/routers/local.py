@@ -79,6 +79,10 @@ def local_mode_enabled() -> bool:
 
 
 def fence_active() -> bool:
+    # Not behind an API key: the key already stops a rebinding page, and a
+    # same-machine reverse proxy (TLS, a tunnel) forwards its public Host.
+    if api_key():
+        return False
     return os.environ.get(LOOPBACK_ENV) == "1" or local_mode_enabled()
 
 
@@ -252,6 +256,12 @@ def _start_loop(project, operation: str, work) -> dict[str, Any]:
             if running.get("operation") == operation:
                 return running  # a second click joins the first
             raise HTTPException(409, "this project is already training or predicting -- wait for it")
+        # One training per machine: two at once on one GPU run out of memory.
+        if operation == "loop.train" and any(
+            (job := _job_running(other)) and job.get("operation") == "loop.train"
+            for other in list(_running) if other.startswith("loop:")
+        ):
+            raise HTTPException(409, "another project is training -- one at a time on this computer")
         job = jobs.submit(secrets.token_hex(8), operation, project.id, work)
         _running[key] = job.id
     return job.as_dict()
@@ -299,9 +309,10 @@ def tools_install(body: InstallIn) -> dict[str, Any]:
             context.emit(len(lines), 0, line[-200:])
 
         result = OpResult(op="tools.install")
-        # Stop the sidecar first: it holds torch's files open, and on Windows
-        # an open DLL cannot be replaced -- a reinstall would half-remove it.
-        REGISTRY.close()
+        # Stop the sidecar, and start none while this runs: it holds torch's
+        # files open, and on Windows an open DLL cannot be replaced -- a
+        # reinstall would half-remove it.
+        REGISTRY.pause("the AI tools are being installed")
         try:
             profile = installer.install(source=_source_checkout(), device=body.device, on_line=on_line)
         except installer.InstallError as exc:
@@ -309,7 +320,7 @@ def tools_install(body: InstallIn) -> dict[str, Any]:
             result.data = {"log": lines[-40:]}
             return result
         finally:
-            REGISTRY.close()  # rediscover: the Assist panel appears on the next look
+            REGISTRY.resume()  # the Assist panel appears on the next look
         result.data = {"profile": profile, "log": lines[-40:]}
         return result
 

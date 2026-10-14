@@ -225,10 +225,12 @@ def train(
             "--imgsz", str(int(imgsz)),
             "--out", str(runs),
             "--name", stamp,
+        ]
+        device = _train_device()
+        if device:
             # What the install verified, not torch.cuda.is_available(): that
             # says yes on a driver the CUDA build cannot actually run on.
-            "--device", _train_device(),
-        ]
+            command += ["--device", device]
         result: dict[str, Any] | None = None
         tail: list[str] = []
         env = child_environment(PYTHONUNBUFFERED="1")
@@ -278,10 +280,12 @@ def train(
 
 
 def _train_device() -> str:
-    profile = read_profile()
-    if profile.get("device") == "cuda":
-        return str(int(profile.get("gpu_index") or 0))
-    return "mps" if profile.get("device") == "mps" else "cpu"
+    """The device the install verified; empty -- the trainer decides -- with
+    no profile, e.g. a tools Python named by DATAFACTORY_TOOLS_PYTHON."""
+    device = read_profile().get("device", "")
+    if device == "cuda":
+        return str(int(read_profile().get("gpu_index") or 0))
+    return device if device in ("mps", "cpu") else ""
 
 
 def latest_model(project: Project) -> Path | None:

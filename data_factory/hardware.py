@@ -102,7 +102,11 @@ def plan(hardware: Hardware | None = None) -> Plan:
 
     if gpu is not None:
         build = _cuda_build_for(gpu.driver, hw.os)
-        if build is None:
+        # Memory first: a 2 GB card is too small whatever its driver.
+        if gpu.vram_gb < 3.5:
+            warnings.append(f"{gpu.name} has {gpu.vram_gb:g} GB: too little for the models. Installing for CPU.")
+            build = None
+        elif build is None:
             warnings.append(
                 f"{gpu.name}: driver {gpu.driver or 'unknown'} is too old for PyTorch's "
                 "CUDA builds -- update the NVIDIA driver to use the GPU. Installing for CPU."
@@ -112,9 +116,6 @@ def plan(hardware: Hardware | None = None) -> Plan:
                 f"driver {gpu.driver} predates current PyTorch CUDA builds: installing PyTorch 2.7 "
                 "with CUDA 11.8. An NVIDIA driver update (560 or newer) gets the current one."
             )
-        elif gpu.vram_gb < 3.5:
-            warnings.append(f"{gpu.name} has {gpu.vram_gb:g} GB: too little for the models. Installing for CPU.")
-            build = None
         if build is not None:
             large = gpu.vram_gb >= 8
             return Plan(
@@ -199,7 +200,9 @@ def _nvidia_gpus() -> list[Gpu]:
     match = re.search(r"CUDA Version:\s*([\d.]+)", header.stdout or "")
     cuda = match.group(1) if match else ""
     gpus = []
-    # nvidia-smi lists in CUDA index order (both default to PCI bus order).
+    # nvidia-smi numbers cards in PCI bus order. CUDA's default is fastest
+    # first, so every child we start sets CUDA_DEVICE_ORDER=PCI_BUS_ID
+    # (annotate/tools/local.child_environment) and the two agree.
     for index, line in enumerate((listing.stdout or "").splitlines()):
         parts = [p.strip() for p in line.split(",")]
         if len(parts) < 3:

@@ -341,9 +341,9 @@ project.export("out/", to="yolo")
           <tbody>
             <tr><td>NVIDIA, 8 GB or more</td><td>CUDA 12.8 or 12.6</td><td class="mono">base</td><td class="mono">large</td></tr>
             <tr><td>NVIDIA, 3.5 to 8 GB</td><td>CUDA 12.8 or 12.6</td><td class="mono">small</td><td class="mono">medium</td></tr>
-            <tr><td>NVIDIA with a driver older than 560</td><td>CUDA 11.8 (PyTorch 2.7)</td><td colspan="2">sized by memory, as above</td></tr>
+            <tr><td>NVIDIA, 3.5 GB or more, driver 522 to 559</td><td>CUDA 11.8 (PyTorch 2.7)</td><td colspan="2">sized by memory, as above</td></tr>
             <tr><td>Apple silicon</td><td>Metal</td><td class="mono">small</td><td class="mono">medium</td></tr>
-            <tr><td>Anything else</td><td>CPU</td><td class="mono">tiny</td><td class="mono">small</td></tr>
+            <tr><td>Anything else, including NVIDIA under 3.5 GB or with a driver older than 522</td><td>CPU</td><td class="mono">tiny</td><td class="mono">small</td></tr>
           </tbody>
         </table>
       </div>
@@ -402,7 +402,7 @@ project.export("out/", to="yolo")
         <div class="number"><b>1.6 s</b><span>to open 20,000 images</span><small>Server start to a listed project. docs/bench_scale.py</small></div>
         <div class="number"><b>0.17 s</b><span>per SAM click, on a CPU</span><small>The image is encoded while you look at it, so a click only decodes.</small></div>
         <div class="number"><b>0.044 s</b><span>per SAM click, on a 4 GB laptop GPU</span><small>RTX 2050 with driver 529, which the installer gave PyTorch 2.7 with CUDA 11.8.</small></div>
-        <div class="number"><b>777</b><span>automated tests</span><small>Including real-browser tests of the editor. CI on Linux and Windows.</small></div>
+        <div class="number"><b>782</b><span>automated tests</span><small>Including real-browser tests of the editor. CI on Linux and Windows.</small></div>
       </div>
     </div>
   </section>
@@ -419,7 +419,8 @@ easyannotate annotate ./photos   <span class="c"># your own folder</span>
 easyannotate tools install       <span class="c"># optional: AI tools</span>
 easyannotate app                 <span class="c"># the desktop window</span></pre>
         <div class="pending">
-          <p style="margin:0"><b>Release pending.</b> Version 0.4.0 is built and tested, and the desktop app and wheels build in CI.
+          <p style="margin:0"><b>Release pending.</b> Version 0.4.0 is built and tested. The wheels and the Windows desktop app have been built and
+          smoke-tested; the release workflow that builds every platform runs on the first version tag.
           Publishing to PyPI and opening the repository are the last steps, so <code>pip install easyannotate</code> does not work yet.</p>
         </div>
       </div>

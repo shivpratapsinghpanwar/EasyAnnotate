@@ -218,15 +218,22 @@ def install(
     try:
         probe = subprocess.run(
             [str(python), "-I", "-c", _PROBE, str(chosen.gpu_index)],
-            capture_output=True, text=True, timeout=600, env=child_environment(),
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=600, env=child_environment(),
         )
     except subprocess.TimeoutExpired:
         raise InstallError("PyTorch took over 10 minutes to start -- try again, or `tools install --cpu`") from None
-    found = [line for line in (probe.stdout or "").splitlines() if line.startswith("PROBE ")]
-    if probe.returncode != 0 or not found:
+    # rfind, not startswith: a library's output without a newline can come
+    # first on the same line (see serve._private_stdout).
+    output = probe.stdout or ""
+    start = output.rfind("PROBE {")
+    if probe.returncode != 0 or start < 0:
         tail = " ".join((probe.stderr or "").strip().splitlines()[-2:])
         raise InstallError(f"PyTorch does not start in {home}: {tail or 'no output'}")
-    result = json.loads(found[-1][len("PROBE "):])
+    try:
+        result = json.loads(output[start + len("PROBE "):].splitlines()[0])
+    except ValueError:
+        raise InstallError(f"PyTorch's self-check in {home} printed something unreadable") from None
     seen = result.get("device") or "cpu"
     profile["verified_device"] = seen
     profile["torch"] = result.get("torch", "")
