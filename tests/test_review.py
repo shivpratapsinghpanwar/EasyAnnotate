@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 
 import pytest
-from conftest import make_image, write_voc
 
 from data_factory.annotate import images, labels, projects, review, shapes
 from data_factory.annotate.store import Store, StoreError

@@ -13,7 +13,7 @@ import sqlite3
 import pytest
 
 from data_factory.annotate import labels, projects
-from data_factory.annotate.store import Conflict, NotFound, Store, StoreError, valid_id
+from data_factory.annotate.store import NotFound, Store, StoreError, valid_id
 
 
 @pytest.fixture()

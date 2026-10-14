@@ -12,9 +12,9 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 import pytest
-from conftest import make_image, make_pair, write_voc
+from conftest import make_image, make_pair
 
-from data_factory.annotate import attach, images, labels, projects, shapes
+from data_factory.annotate import attach, images, labels, shapes
 from data_factory.annotate.store import Store, StoreError
 from data_factory.core.annotations.model import Shape
 

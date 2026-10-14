@@ -13,7 +13,7 @@ from conftest import make_image
 from data_factory.annotate import images, projects, shapes
 from data_factory.annotate import store as store_mod
 from data_factory.annotate.store import Store
-from data_factory.core.annotations import coco, csvfmt, dota, formats, labelme, yolo
+from data_factory.core.annotations import coco, csvfmt, formats, labelme, yolo
 from data_factory.core.annotations.model import Annotation, AnnotationError, Shape
 from data_factory.core.types import Context
 

@@ -14,7 +14,6 @@ Install it with::
 
 from __future__ import annotations
 
-import os
 import socket
 import threading
 import time
@@ -1033,7 +1032,6 @@ def test_the_export_button_downloads_a_dataset(browser, service, bare_images):
             page.click("#btn-export")
         download = pending.value
         assert download.suggested_filename.endswith(".zip")
-        import io as _io
         import zipfile as _zipfile
 
         saved = download.path()
