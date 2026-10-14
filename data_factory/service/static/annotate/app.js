@@ -171,20 +171,25 @@ class Editor {
 
     this.rail.setLabels(this.project.labels || []);
     this.rail.setHidden(this.hiddenClasses);
-    await this.loadImageList();
-
-    this.updateReviewPanel(this.project.agreement);
 
     // Heavy tools are optional. An empty list hides the panel entirely --
-    // never a greyed-out button, never an install nag.
-    try {
-      this.assistPanel.setTools(await this.api.tools());
-    } catch {
-      this.assistPanel.setTools({ tools: [] });
-    }
+    // never a greyed-out button, never an install nag. Asked for in
+    // parallel and never awaited before the first image: the first call
+    // starts the sidecar process, and the picture must not wait for a
+    // Python interpreter to boot (measured: 2.4s to first image when it did).
+    this.api
+      .tools()
+      .then((payload) => this.assistPanel.setTools(payload))
+      .catch(() => this.assistPanel.setTools({ tools: [] }));
 
     const resume = this.project.resume;
-    if (resume) await this.openImage(resume.id);
+    const opening = resume ? this.openImage(resume.id) : null;
+    await this.loadImageList();
+    // The strip learns its length only now; if the image opened first, its
+    // scroll-to-current happened against an empty list. Do it again.
+    if (this.strip.currentId) this.strip.reveal(this.strip.currentId);
+    this.updateReviewPanel(this.project.agreement);
+    if (opening) await opening;
     else this.say("this project has no images yet");
   }
 

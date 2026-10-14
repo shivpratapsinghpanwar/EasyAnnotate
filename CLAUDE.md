@@ -35,15 +35,19 @@ the first box. Removing that is the entire product argument.
 **Phases 0–4 of `docs/PLAN.md` are done; of `docs/ROADMAP.md`, M0 (trust),
 M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
 binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
-text prompts, batch prompt → predictions) and the rotated-box/line/point half
-of M5.** 682 tests pass, including 30 browser tests (install playwright).
+text prompts, batch prompt → predictions, SAM encode-ahead), M4 (the loop:
+`easyannotate train/predict`, uncertainty-ordered review queue) and the
+rotated-box/line/point half of M5.** 697 tests pass, including 31 browser tests
+(install playwright). `docs/bench_scale.py` measures 20k images: all gates pass.
 
 AI tools live in `tools/` as the separate `easyannotate-tools` distribution,
 installed into `~/.datafactory/tools` (`easyannotate tools install --source .`
 from a checkout). Tests set `DATAFACTORY_TOOLS_HOME` to an empty dir so they
-never start the real sidecar. Verified only via a CLI smoke on bus.jpg, **not
-yet clicked through in the editor with the real models**, and the true cold
-start (CLIP's 338 MB first download) was never observed end to end. **The roadmap is the plan of record now** — a scored
+never start the real sidecar. The real models were driven through the
+editor in a browser from cold (CLIP's 338 MB download included: 46 s to the
+first text-prompt result), and `easyannotate train` ran for real on CPU (it
+found a crash the fake trainer could not -- keep running these by hand after
+touching `tools/`; they are outside pytest on purpose). **The roadmap is the plan of record now** — a scored
 path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
 
 Commits carry the owner's name only: never a Claude co-author line.
@@ -73,9 +77,9 @@ index, retiring keeps the slot, new classes append. It used to be
   Rule unchanged: **test these by running them, not by reading them.**
 - **Phase 5 (hosted)** — accounts, quotas, per-tenant isolation. Not started.
   `owner_id` scoping already exists throughout, so it is additive.
-- **`detect.infer`** — training/inference still happens outside the tool. This
-  is probably the highest-value remaining feature; the loop is what is
-  monetisable, not the annotator.
+- **The editor cannot start a training run itself** — `easyannotate train` is
+  CLI-only today. A "train on reviewed" button (local only) is the obvious
+  next step for the loop.
 - **The user has not yet used the editor properly.** The plan ranks "editor
   feel" as risk #1. Their feedback outranks new features.
 
@@ -106,7 +110,8 @@ index, retiring keeps the slot, new classes append. It used to be
 easyannotate demo                 # sample project in the browser
 easyannotate serve                # http://localhost:8765
 easyannotate annotate <folder>    # edit a folder's labels in place
-python -m pytest                  # 682; 30 browser tests skip without playwright
+easyannotate train <folder>       # reviewed -> model -> predictions on the rest
+python -m pytest                  # 697; 31 browser tests skip without playwright
 ```
 
 Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3

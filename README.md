@@ -531,6 +531,26 @@ truthful record.
 
 ## Performance
 
+**The editor at 20,000 images** (`uv run python docs/bench_scale.py`, a laptop,
+medians; gates set in `docs/PLAN.md` before the editor existed):
+
+| What a person waits for | Time | Gate |
+|---|---:|---|
+| Editor open to first image, in a browser | 1.6 s | 2 s |
+| Image list page, first or last of 20,000 | 5–7 ms | 200 ms |
+| "Least sure first" queue page | 6 ms | 200 ms |
+| Open an image's shapes | 2 ms | 300 ms |
+| Save a shape, round trip | 7 ms | 100 ms |
+| Scroll the strip to the last image | 139 ms | 1 s |
+| Strip rows in the DOM | 28 | — |
+| Open a 20,000-image folder, first time | 3.7 s | — |
+
+**AI assist on a CPU** (no GPU used), measured in the editor: SAM outline 0.17 s
+per click once the image is encoded (encoding happens ahead, as you look);
+"find every person" 4–5 s per image warm, 46 s the very first time (CLIP
+downloads); `easyannotate train` on 4 reviewed images, 3 epochs, then
+predicting 20 more: 16 s end to end.
+
 Decode-bound stages run across threads, in input order, so results stay
 reproducible. Measured on the real Project_Door set:
 
