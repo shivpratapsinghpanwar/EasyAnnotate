@@ -91,6 +91,13 @@ index, retiring keeps the slot, new classes append. It used to be
 - `annotate/` must not import fastapi.
 - **Clients never send filesystem paths.** Path-kind params are *refused, not
   sanitised*. Attached projects are CLI-only for exactly this reason.
+- **One route takes a path: `POST /api/local/open`** (`routers/local.py`),
+  and only behind all four fences: a per-launch token (minted by the CLI or
+  desktop launcher, sent in the URL `#fragment`, then as `X-Local-Token`),
+  a localhost `Host`, no foreign `Origin`, and local mode (never with an API
+  key, a non-localhost bind, or `DATAFACTORY_ALLOW_ATTACHED=0`). It returns a
+  project id. Operations still never take paths from clients -- running ops
+  in place on arbitrary folders from a browser is deliberately not offered.
 - **No HTTP route loads a model file.** A `.pt` is a pickle: loading it runs
   it. Tools of kind `"model"` are refused by every tools route and hidden from
   the editor; `easyannotate predict/train` are the only way in.

@@ -95,19 +95,26 @@ code{font-family:var(--mono);font-size:.85em;background:var(--bg);padding:.08em 
 
 <main>
 <div>
-  <!-- desktop only: the system's folder dialog. Shown when the page runs
-       inside the EasyAnnotate window, where the path never leaves this
-       machine's own process. The browser version has no such button, on
-       purpose: a web page must never be able to name a filesystem path. -->
+  <!-- This computer: shown inside the desktop window, or in a tab that the
+       launcher opened with its per-launch token (see routers/local.py). An
+       ordinary web page never sees it: without the token the server refuses,
+       and the card stays hidden. Opening a folder hands back a project id. -->
   <div class="card hide" id="openFolderCard" style="margin-bottom:1.25rem">
-    <h2>Annotate a folder on this computer</h2>
+    <h2>Work on a folder on this computer</h2>
     <div class="row">
-      <button class="primary" id="btnOpenFolder">Open a folder&hellip;</button>
+      <input type="text" id="folderPath" placeholder="Paste a folder path, e.g. D:\photos\doors"
+             autocomplete="off" spellcheck="false">
+      <button class="primary" id="btnOpenPath">Open</button>
+      <button id="btnOpenFolder">Browse&hellip;</button>
     </div>
     <p class="note" id="openFolderNote" style="margin:.6rem 0 0">
       Labels already in the folder are loaded, and your edits are written back
       into its own label files as you draw. Nothing is copied or uploaded.
     </p>
+    <div id="recentProjects" class="hide" style="margin-top:.8rem">
+      <div class="note" style="margin-bottom:.35rem">Recent</div>
+      <div id="recentList"></div>
+    </div>
   </div>
 
   <!-- upload -->
@@ -317,32 +324,108 @@ $("btnAnnotate").onclick = async () => {
   }
 };
 
-// ---------------------------------------------------------------- desktop
-// Inside the native window pywebview announces itself; only then does the
-// folder button exist. The call returns a project id, never a path.
-function enableDesktop(){
-  if(!(window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder)) return;
-  $("openFolderCard").classList.remove("hide");
+// ---------------------------------------------------------------- this computer
+// Two ways to be allowed to open a local folder: the desktop window's own
+// bridge, or the token a launcher put in this tab's URL fragment. Either way
+// the page only ever gets a project id back.
+const LOCAL_KEY = "easyannotate:local-token";
+function adoptLocalToken(){
+  const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash || "");
+  if(!match) return false;
+  try{ sessionStorage.setItem(LOCAL_KEY, decodeURIComponent(match[1])); }catch(e){}
+  history.replaceState(null, "", location.pathname + location.search);
+  return true;
 }
-window.addEventListener("pywebviewready", enableDesktop);
-enableDesktop();
+adoptLocalToken();
+// Pasting the launcher's URL into a tab already on this page changes only the
+// fragment, which does not reload it -- so listen for that too.
+window.addEventListener("hashchange", () => { if(adoptLocalToken()) enableLocal(); });
+function localToken(){
+  try{ return sessionStorage.getItem(LOCAL_KEY) || ""; }catch(e){ return ""; }
+}
+const hasBridge = () => !!(window.pywebview && window.pywebview.api && window.pywebview.api.pick_folder);
+let serverDialog = false;
 
-$("btnOpenFolder").onclick = async () => {
-  const button = $("btnOpenFolder");
-  const note = $("openFolderNote");
-  button.disabled = true;
-  try{
-    const result = await window.pywebview.api.pick_folder();
-    if(result.cancelled){ return; }
-    if(result.error){ note.textContent = result.error; return; }
-    note.textContent = `${result.name}: ${result.images} image(s), opening…`;
-    window.location = `/annotate?project=${encodeURIComponent(result.project)}`;
-  }catch(error){
-    note.textContent = String(error.message || error);
-  }finally{
-    button.disabled = false;
+async function localApi(path, body){
+  const response = await api(`/local${path}`, {
+    method: body === undefined ? "GET" : "POST",
+    headers: {"Content-Type": "application/json", "X-Local-Token": localToken()},
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if(!response.ok) throw new Error(payload.detail || `HTTP ${response.status}`);
+  return payload;
+}
+
+async function enableLocal(){
+  let viaToken = false;
+  if(localToken()){
+    try{
+      const status = await localApi("/status");
+      viaToken = true;
+      serverDialog = !!status.dialog;
+    }catch(e){ /* a stale or foreign token: behave as an ordinary page */ }
   }
-};
+  if(!viaToken && !hasBridge()) return;
+  $("openFolderCard").classList.remove("hide");
+  // Typing a path needs the token; browsing needs the bridge or a dialog.
+  $("folderPath").parentElement.querySelector("#btnOpenPath").classList.toggle("hide", !viaToken);
+  $("folderPath").classList.toggle("hide", !viaToken);
+  $("btnOpenFolder").classList.toggle("hide", !(hasBridge() || serverDialog));
+  showRecent();
+}
+window.addEventListener("pywebviewready", enableLocal);
+enableLocal();
+
+function goTo(result){
+  if(result.cancelled) return;
+  $("openFolderNote").textContent = `${result.name}: ${result.images} image(s)` +
+    (result.imported ? `, ${result.imported} existing shape(s) loaded` : "") + " — opening…";
+  window.location = `/annotate?project=${encodeURIComponent(result.project)}`;
+}
+
+async function withBusy(button, work){
+  button.disabled = true;
+  try{ await work(); }
+  catch(error){ $("openFolderNote").textContent = String(error.message || error); }
+  finally{ button.disabled = false; }
+}
+
+$("btnOpenPath").onclick = () => withBusy($("btnOpenPath"), async () => {
+  const path = $("folderPath").value.trim();
+  if(!path){ $("openFolderNote").textContent = "paste the folder's full path first"; return; }
+  goTo(await localApi("/open", {path}));
+});
+$("folderPath").addEventListener("keydown", (event) => {
+  if(event.key === "Enter") $("btnOpenPath").click();
+});
+$("btnOpenFolder").onclick = () => withBusy($("btnOpenFolder"), async () => {
+  if(hasBridge()){
+    const result = await window.pywebview.api.pick_folder();
+    if(result.error) throw new Error(result.error);
+    goTo(result);
+  }else{
+    goTo(await localApi("/pick", {}));
+  }
+});
+
+async function showRecent(){
+  try{
+    const payload = await (await api("/projects")).json();
+    const projects = (payload.projects || []).slice(0, 6);
+    if(!projects.length) return;
+    const list = $("recentList");
+    list.replaceChildren();
+    for(const project of projects){
+      const link = document.createElement("a");
+      link.href = `/annotate?project=${encodeURIComponent(project.id)}`;
+      link.textContent = project.name;
+      link.style.cssText = "display:block;padding:.2rem 0";
+      list.append(link);
+    }
+    $("recentProjects").classList.remove("hide");
+  }catch(e){ /* recent projects are a convenience */ }
+}
 
 // ---------------------------------------------------------------- running
 $("btnRun").onclick = () => run(false);

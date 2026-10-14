@@ -1121,3 +1121,31 @@ def test_accepting_walks_the_least_sure_first_queue(browser, service, bare_image
     finally:
         page.close()
     assert not errors, errors
+
+
+# ---------------------------------------------------------- the local link
+
+
+def test_the_front_page_opens_a_local_folder_only_with_the_launch_token(browser, service, annotated_images, monkeypatch):
+    """Without the token the page offers nothing local. With it -- arriving in
+    the URL fragment, as a launcher sends it -- a pasted path opens the
+    editor, and the token leaves the address bar."""
+    monkeypatch.setenv("EASYANNOTATE_LOCAL_TOKEN", "browser-test-token-0123456789")
+    errors: list[str] = []
+    local_base = service.replace("127.0.0.1", "localhost")
+    page = browser.new_page(viewport={"width": 1280, "height": 820})
+    page.on("pageerror", lambda exc: errors.append(f"pageerror: {exc}"))
+    try:
+        page.goto(local_base, wait_until="networkidle")
+        assert page.locator("#openFolderCard").is_hidden()
+
+        page.goto(f"{local_base}/#token=browser-test-token-0123456789", wait_until="networkidle")
+        page.wait_for_selector("#openFolderCard:not(.hide)", timeout=10_000)
+        assert "token" not in page.url
+        page.fill("#folderPath", str(annotated_images))
+        page.click("#btnOpenPath")
+        page.wait_for_function("window.__editor && window.__editor.image", timeout=30_000)
+        assert "/annotate?project=" in page.url
+    finally:
+        page.close()
+    assert not errors, errors

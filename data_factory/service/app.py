@@ -50,6 +50,7 @@ from . import binding
 from . import jobs as jobs_module
 from .limits import BodyLimit
 from .routers import annotate as annotate_router
+from .routers import local as local_router
 from .routers import media as media_router
 from .routers import predictions as predictions_router
 from .routers import promote as promote_router
@@ -101,6 +102,7 @@ app.include_router(media_router.router)
 app.include_router(promote_router.router)
 app.include_router(predictions_router.router)
 app.include_router(tools_router.router)
+app.include_router(local_router.router)
 
 # Before anything reads a body. See limits.py for why the handler's own byte
 # count could never do this.

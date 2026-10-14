@@ -170,7 +170,11 @@ def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     os.environ.setdefault("DATAFACTORY_WORKSPACE", str(default_workspace()))
     port = free_port()
-    url = f"http://127.0.0.1:{port}"
+    from .service.routers.local import mint_token
+
+    # The window is this machine's own; the token lets its page open folders
+    # by path too, not only through the dialog.
+    url = f"http://127.0.0.1:{port}/#token={mint_token()}"
 
     # Flushed: when the console is a pipe the banner would otherwise sit in a
     # buffer until exit, and the one thing a launcher must do is say its URL.

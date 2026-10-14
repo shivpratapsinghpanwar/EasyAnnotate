@@ -1615,6 +1615,20 @@ function describe(error) {
   return error && error.message ? error.message : String(error);
 }
 
+// The local-link token arrives in the URL fragment when a launcher opened
+// this tab. Keep it for this tab only, and take it out of the address bar so
+// it is not bookmarked, shared or shown.
+(function adoptLocalToken() {
+  const match = /(?:^|[#&])token=([^&]+)/.exec(location.hash || "");
+  if (!match) return;
+  try {
+    sessionStorage.setItem("easyannotate:local-token", decodeURIComponent(match[1]));
+  } catch {
+    // Storage refused: the editor works the same; only folder opening needs it.
+  }
+  history.replaceState(null, "", location.pathname + location.search);
+})();
+
 const editor = new Editor();
 editor.boot();
 window.__editor = editor;

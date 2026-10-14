@@ -13,6 +13,19 @@ easyannotate annotate ./my-images  # your own folder: labels are written in plac
 easyannotate app                   # or a desktop window, with an Open-folder button
 ```
 
+Three ways to run it, one codebase:
+
+- **Local web app** — `easyannotate serve` opens a page in your browser that
+  talks to a server on *your own machine*. Paste a folder path (or Browse) and
+  work on it in place; nothing is uploaded unless you upload a zip yourself.
+  The link the launcher opens carries a one-time key, so no other website can
+  reach your folders through it.
+- **Headless** — `import easyannotate as ea` for scripts and pipelines, the
+  `easyannotate` CLI, or `easyannotate serve --headless` on a GPU box, reached
+  through an SSH tunnel.
+- **Desktop app** — its own window, an Open-folder button, everything
+  included except the heavy models, which download only when you ask.
+
 Or download the desktop app for Windows, macOS or Linux from the
 [releases page](https://github.com/shivpratapsinghpanwar/EasyAnnotate/releases) —
 no Python needed.
@@ -475,9 +488,16 @@ which is the point of the health check.
 ## As a library, and in a web app
 
 ```python
-import data_factory as df
+import easyannotate as ea
 
-result = df.run("inspect.health", {"folder": "./data"})
+project = ea.open_folder("./doors")            # the same project the editor shows
+print(project.counts())                        # {'todo': 812, 'reviewed': 200, ...}
+project.import_predictions("runs/predict/labels")
+hardest = project.images(state="predicted", order="uncertain")[:20]
+project.export("./train-set", to="yolo")       # reviewed only; class indices never move
+project.train(epochs=30)                       # needs: easyannotate tools install
+
+result = ea.run("inspect.health", {"folder": "./data"})
 for finding in result.data["findings"]:
     print(finding["severity"], finding["issue"], "->", finding["fix"])
 

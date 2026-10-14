@@ -269,6 +269,21 @@ def _cmd_menu(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     return run_menu(out, err)
 
 
+def _local_fragment(args: argparse.Namespace) -> str:
+    """``#token=...`` when this server is for this machine only -- the key that
+    lets the browser open local folders (see service/routers/local.py). Never
+    minted for a server reachable from the network or behind an API key."""
+    import os
+
+    if args.host not in ("127.0.0.1", "localhost", "::1"):
+        return ""
+    if getattr(args, "api_key", None) or os.environ.get("DATAFACTORY_API_KEY"):
+        return ""
+    from ..service.routers.local import mint_token
+
+    return f"#token={mint_token()}"
+
+
 def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     """Start the local web interface.
 
@@ -295,6 +310,7 @@ def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
         return 2
 
     url = f"http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}"
+    url += _local_fragment(args)
     out.write(f"EasyAnnotate is at {url}\n")
     if args.host == "0.0.0.0" and not args.api_key:
         err.write(
@@ -392,7 +408,7 @@ def _cmd_annotate(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
 def _serve_editor(project_id: str, args: argparse.Namespace, out: TextIO) -> int:
     """Start the server and open the editor on one project."""
     host = "localhost" if args.host in ("127.0.0.1", "0.0.0.0") else args.host
-    url = f"http://{host}:{args.port}/annotate?project={project_id}"
+    url = f"http://{host}:{args.port}/annotate?project={project_id}" + _local_fragment(args)
     out.write(f"\n{url}\n")
     out.write("Press Ctrl+C to stop.\n")
     out.flush()
