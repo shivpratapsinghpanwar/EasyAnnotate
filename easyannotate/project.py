@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Callable, Iterable
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,9 @@ from data_factory.core.types import Context, OpResult
 from data_factory.service.workspace import resolve_workspace_root
 
 _stores: dict[Path, Store] = {}
+# Opening a store migrates it; two threads doing that at once raced to
+# "database is locked". One lock, as the server's cache has.
+_stores_lock = threading.Lock()
 
 
 def database_path() -> Path:
@@ -25,10 +29,20 @@ def database_path() -> Path:
 
 
 def _store() -> Store:
-    path = database_path()
-    if path not in _stores:
-        _stores[path] = Store(path)
-    return _stores[path]
+    path = database_path().resolve()
+    with _stores_lock:
+        if path not in _stores:
+            _stores[path] = Store(path)
+        return _stores[path]
+
+
+def close() -> None:
+    """Release the database files. Needed before deleting the folder they are
+    in -- Windows will not remove an open file."""
+    with _stores_lock:
+        for store in _stores.values():
+            store.close()
+        _stores.clear()
 
 
 def open_folder(folder: str | Path, *, name: str = "", import_annotations: bool = True) -> Project:
@@ -39,7 +53,9 @@ def open_folder(folder: str | Path, *, name: str = "", import_annotations: bool 
     first time.
     """
     store = _store()
-    summary = attach.open_folder(store, Path(folder), name=name, import_annotations=import_annotations)
+    summary = attach.open_folder(
+        store, Path(folder).expanduser(), name=name, import_annotations=import_annotations
+    )
     return Project(store, summary["project"], notes=summary.get("warnings") or [])
 
 
@@ -77,7 +93,9 @@ class Project:
         """Where the images are: the folder you opened, or the managed copy."""
         if self._record.is_attached and self._record.root:
             return Path(self._record.root)
-        return database_path().parent / "projects" / self._record.id
+        # Beside *this project's* database -- not wherever the environment
+        # points now, which may be another workspace by the time this is read.
+        return self._store.path.parent / "projects" / self._record.id
 
     def __repr__(self) -> str:
         return f"<Project {self.name!r} {self.id[:8]} {self.counts()}>"
@@ -92,10 +110,20 @@ class Project:
         """The class list in index order -- what YOLO index *n* means."""
         return labels.class_list(self._store, self._record)
 
-    def images(self, *, state: str = "", order: str = "", limit: int = 5000) -> list[dict[str, Any]]:
-        """Images as dicts. ``order="uncertain"`` puts likely mistakes first."""
-        found = images.listing(self._store, self._record, state=state, order=order, limit=limit)
-        return [image.as_dict() for image in found]
+    def images(self, *, state: str = "", order: str = "", limit: int | None = None,
+               offset: int = 0) -> list[dict[str, Any]]:
+        """Images as dicts -- all of them unless ``limit`` says otherwise.
+        ``order="uncertain"`` puts likely mistakes first."""
+        found: list[dict[str, Any]] = []
+        page = 5000  # the store's largest page
+        while limit is None or len(found) < limit:
+            want = page if limit is None else min(page, limit - len(found))
+            batch = images.listing(self._store, self._record, state=state, order=order,
+                                   limit=want, offset=offset + len(found))
+            found.extend(image.as_dict() for image in batch)
+            if len(batch) < want:
+                break
+        return found
 
     def shapes(self, image_id: str) -> list[dict[str, Any]]:
         image = images.get(self._store, self._record, image_id)
@@ -112,14 +140,14 @@ class Project:
         """Load a model run (YOLO .txt folder, COCO results .json, VOC, LabelMe)
         as predictions to review. Returns the matching report -- read it."""
         return review.import_predictions(
-            self._store, self._record, Path(source),
+            self._store, self._record, Path(source).expanduser(),
             min_confidence=min_confidence, overwrite_reviewed=overwrite_reviewed,
         )
 
     def predict(self, model: str | Path, *, conf: float = 0.25,
                 on_progress: Callable[[int, int, str], None] | None = None) -> dict[str, Any]:
         """Run an Ultralytics model over the unreviewed images. Needs the tools."""
-        return loop.predict(self._store, self._record, self.root, Path(model), conf=conf,
+        return loop.predict(self._store, self._record, self.root, Path(model).expanduser(), conf=conf,
                             on_progress=on_progress)
 
     def train(self, *, epochs: int = 30, imgsz: int = 640, base: str = "yolov8n.pt",
@@ -134,16 +162,20 @@ class Project:
         """Write the project as a dataset. Reviewed images only, by default --
         exporting unreviewed model output into training is how a model poisons
         itself. Class indices are the project's own and never move."""
-        operation = registry.get("annotate.export")
-        params = {param.name: param.default for param in operation.params}
-        params.update({
-            "database": self._store.path,
-            "project": self._record.id,
-            "output": Path(output),
-            "to": to,
-            "states": list(states),
-            "owner": self._record.owner_id,
-            "copy_images": copy_images,
-            "segmentation": segmentation,
-        })
-        return operation.func(params, Context(dry_run=dry_run))
+        if isinstance(states, str):
+            states = [states]  # "reviewed", not r, e, v, i, e, w, e, d
+        # Through Operation.run, like every other caller: the same validation
+        # (a bad format is a ParamError), `~` expanded, and provenance written.
+        return registry.get("annotate.export").run(
+            {
+                "database": str(self._store.path),
+                "project": self._record.id,
+                "output": str(output),
+                "to": to,
+                "states": list(states),
+                "owner": self._record.owner_id,
+                "copy_images": copy_images,
+                "segmentation": segmentation,
+            },
+            Context(dry_run=dry_run),
+        )

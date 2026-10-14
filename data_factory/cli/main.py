@@ -320,7 +320,14 @@ def _cmd_serve(args: argparse.Namespace, out: TextIO, err: TextIO) -> int:
     out.write("Press Ctrl+C to stop.\n")
     out.flush()
 
-    if args.headless:
+    if args.headless and args.host not in ("127.0.0.1", "localhost", "::1"):
+        args.no_browser = True
+        out.write(
+            f"headless, listening on {args.host}: reachable from the network.\n"
+            "Protect it with --api-key, or bind to 127.0.0.1 and use an SSH tunnel.\n"
+        )
+        out.flush()
+    elif args.headless:
         args.no_browser = True
         out.write(
             "headless: nothing opens here. From your own computer:\n"

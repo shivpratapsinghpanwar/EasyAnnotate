@@ -249,13 +249,11 @@ def _export_reviewed(store: Store, project: Project, output: Path) -> None:
     from ..core import registry
     from ..core.types import Context
 
-    operation = registry.get("annotate.export")
-    params = {param.name: param.default for param in operation.params}
-    params.update(
+    result = registry.get("annotate.export").run(
         {
-            "database": store.path,
+            "database": str(store.path),
             "project": project.id,
-            "output": output,
+            "output": str(output),
             "to": "yolo",
             "states": ["reviewed"],
             "owner": project.owner_id,
@@ -264,9 +262,9 @@ def _export_reviewed(store: Store, project: Project, output: Path) -> None:
             # detection label file is a guess about what the trainer does.
             "segmentation": False,
             "include_empty": True,
-        }
+        },
+        Context(),
     )
-    result = operation.func(params, Context())
     if not result.ok:
         raise LoopError("could not export the reviewed images: " + "; ".join(result.errors))
 

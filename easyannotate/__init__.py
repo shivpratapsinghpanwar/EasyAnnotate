@@ -22,19 +22,36 @@ from __future__ import annotations
 from data_factory import (
     Context,
     OpResult,
+    ParamError,
     __version__,
     get_operation,
     list_operations,
     run,
     schema,
 )
+from data_factory.annotate.attach import AttachError
+from data_factory.annotate.loop import LoopError
+from data_factory.annotate.review import ReviewError
+from data_factory.annotate.store import NotFound, StoreError
 
-from .project import Project, database_path, list_projects, open_folder, open_project
+from .project import Project, close, database_path, list_projects, open_folder, open_project
+
+#: Errors about projects, images, labels, predictions and the loop derive from
+#: this. A bad parameter to an operation or export raises ParamError instead.
+Error = StoreError
 
 __all__ = [
+    "AttachError",
     "Context",
+    "Error",
+    "LoopError",
+    "NotFound",
     "OpResult",
+    "ParamError",
     "Project",
+    "ReviewError",
+    "StoreError",
+    "close",
     "__version__",
     "database_path",
     "get_operation",

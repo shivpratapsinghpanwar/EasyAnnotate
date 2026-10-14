@@ -1395,7 +1395,9 @@ class Editor {
       while (!["finished", "failed", "cancelled"].includes(status.state)) {
         await pause(800);
         status = await this.api.job(job.id);
-        if (status.progress) this.say(`finding "${text}": ${status.progress}`);
+        // progress is {done, total, message, percent}, not a string.
+        const progress = status.progress || {};
+        if (progress.total) this.say(`finding "${text}": ${progress.done}/${progress.total} ${progress.message || ""}`);
       }
       if (status.state !== "finished") {
         this.say(`search ${status.state}: ${status.error || "no detail"}`);

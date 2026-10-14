@@ -49,6 +49,7 @@ jobs:
           /tmp/clean/bin/easyannotate --version
           /tmp/clean/bin/easyannotate list | head -5
           /tmp/clean/bin/python -c "import data_factory.service.app, data_factory.annotate.demo"
+          /tmp/clean/bin/python -c "import easyannotate as ea; print(ea.__version__, len(ea.list_operations()))"
       - uses: actions/upload-artifact@v4
         with:
           name: dist

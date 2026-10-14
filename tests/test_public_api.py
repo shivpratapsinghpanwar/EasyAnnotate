@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 
+from pathlib import Path
+
 import pytest
 
 from conftest import make_image, write_voc
@@ -16,9 +18,7 @@ def ea(tmp_path, monkeypatch):
 
     project_mod._stores.clear()
     yield easyannotate
-    for store in project_mod._stores.values():
-        store.close()
-    project_mod._stores.clear()
+    easyannotate.close()
 
 
 @pytest.fixture
@@ -35,7 +35,7 @@ def test_a_script_opens_a_folder_and_exports_reviewed_work(ea, folder, tmp_path)
     assert project.counts()["total"] == 3 and project.counts()["reviewed"] == 1
     assert project.classes() == ["Open"]
     assert project.root == folder.resolve()
-    assert ea.database_path() == tmp_path / "ws" / ".." / "annotations.db" or ea.database_path().name == "annotations.db"
+    assert ea.database_path().resolve() == (tmp_path / "annotations.db").resolve()
 
     result = project.export(tmp_path / "out", to="yolo")
     assert result.ok, result.errors
@@ -73,3 +73,59 @@ def test_python_dash_m_is_the_command(tmp_path):
 
     done = subprocess.run([sys.executable, "-m", "easyannotate", "--version"], capture_output=True, text=True)
     assert done.returncode == 0 and done.stdout.startswith("easyannotate ")
+
+
+def test_review_findings_stay_fixed(ea, folder, tmp_path, monkeypatch):
+    """What the independent review of the first version found."""
+    import threading
+
+    project = ea.open_folder(folder)
+    # A state as a plain string is one state, not its letters.
+    assert project.export(tmp_path / "a", states="reviewed").ok
+    # Formats are validated like every other caller's, and `~` is expanded.
+    with pytest.raises(ea.ParamError):
+        project.export(tmp_path / "b", to="bogus")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path / "home"))
+    assert project.export("~/exported").ok
+    assert (tmp_path / "home" / "exported").is_dir()
+    assert not (Path.cwd() / "~").exists()
+    # Provenance is written, as for ea.run().
+    assert (tmp_path / "home" / "exported" / ".datafactory" / "history.jsonl").is_file()
+    # Errors are catchable from the public surface.
+    with pytest.raises(ea.Error):
+        ea.open_project("0" * 32)
+
+    # The store is opened once however many threads ask first.
+    from easyannotate import project as project_mod
+
+    ea.close()
+    failures = []
+
+    def first_touch():
+        try:
+            ea.open_folder(folder).counts()
+        except Exception as exc:  # pragma: no cover - the failure being guarded
+            failures.append(exc)
+
+    threads = [threading.Thread(target=first_touch) for _ in range(12)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == [] and len(project_mod._stores) == 1
+
+
+def test_images_reach_past_one_page(ea):
+    """The store pages at 5,000; a script asking for everything gets everything."""
+    from data_factory.annotate import images as images_mod
+    from data_factory.annotate import projects as projects_mod
+    from easyannotate import project as project_mod
+
+    store = project_mod._store()
+    record = projects_mod.create(store, "many")
+    images_mod.add_many(store, record, [(f"i{n:05d}.jpg", 10, 10) for n in range(5200)])
+    project = ea.open_project(record.id)
+    assert project.counts()["total"] == 5200
+    assert len(project.images()) == 5200
+    assert len(project.images(limit=10, offset=5195)) == 5
