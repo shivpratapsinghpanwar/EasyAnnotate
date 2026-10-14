@@ -1,0 +1,45 @@
+# Publishes the showcase site in site/ to GitHub Pages.
+#
+# GitHub serves Pages from a private repository only on paid plans, so the
+# job is skipped while this repository is private, rather than failing on
+# every push. Once it is public, turn Pages on once in Settings -> Pages with
+# "GitHub Actions" as the source; every later push to site/ redeploys.
+#
+# For annotationfree4u.com, add site/CNAME containing the domain *after* its
+# DNS points at GitHub. A CNAME without DNS redirects the github.io address to
+# a domain that does not answer.
+
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths: ["site/**", "docs/demo.gif", ".github/workflows/pages.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    if: ${{ !github.event.repository.private }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      # The editor demo lives in docs/ for the README; one copy in git.
+      - run: cp docs/demo.gif site/demo.gif
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+      - id: deployment
+        uses: actions/deploy-pages@v4

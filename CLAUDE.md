@@ -37,8 +37,15 @@ M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
 binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
 text prompts, batch prompt → predictions, SAM encode-ahead), M4 (the loop:
 `easyannotate train/predict`, uncertainty-ordered review queue) and the
-rotated-box/line/point half of M5.** 697 tests pass, including 31 browser tests
+rotated-box/line/point half of M5.** 777 tests pass, including 32 browser tests
 (install playwright). `docs/bench_scale.py` measures 20k images: all gates pass.
+
+**Three front ends, as the owner asked (Oct 2026):** (1) the browser bound to
+this computer -- the token-fenced local link opens folders from the front
+page; (2) headless -- the public `easyannotate` library (`ea.open_folder`)
+and `serve --headless`; (3) the desktop app, which carries uv and both
+wheels so "Install AI tools" works with no Python, plus Train/Predict in the
+editor. The showcase site is `site/` (Pages workflow skips while private).
 
 AI tools live in `tools/` as the separate `easyannotate-tools` distribution,
 installed into `~/.datafactory/tools` (`easyannotate tools install --source .`
@@ -49,6 +56,14 @@ first text-prompt result), and `easyannotate train` ran for real on CPU (it
 found a crash the fake trainer could not -- keep running these by hand after
 touching `tools/`; they are outside pytest on purpose). **The roadmap is the plan of record now** — a scored
 path from 52 to 75 against CVAT, Roboflow, X-AnyLabeling and others.
+
+**GPU, measured on this laptop (RTX 2050 4 GB, driver 529.04):** PyTorch's
+cu126 build reports CUDA available and fails every allocation; 2.7.1+cu118
+works. `hardware.plan()` now picks builds by each toolkit's own driver and
+the installer runs real work on the device before trusting it. SAM 0.044 s
+a click, a new text prompt ~1 s (after caching CLIP), training via
+`loop.train` on device 0. Ultralytics prints to stdout: the sidecar keeps
+fd 1 for replies (`serve._private_stdout`) -- never undo that.
 
 Commits carry the owner's name only: never a Claude co-author line.
 
@@ -68,8 +83,10 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **CI (`ci.yml`) and releases (`release.yml`) have never run** — written,
-  first execution is the first push. Expect fixes.
+- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **`release.yml`
+  has never run**: no tag yet. Its desktop smoke test was run by hand on
+  Windows against a local PyInstaller build. macOS produces a folder, not
+  a `.app`.
 - **PyPI publish** (both `easyannotate` and `easyannotate-tools`) and
   **making the repo public** — the owner's calls, not yet made. The wheel (`uv build`) installs into a clean venv and runs; the
   PyInstaller binary (`pyinstaller packaging/easyannotate.spec`) boots and
@@ -77,9 +94,8 @@ index, retiring keeps the slot, new classes append. It used to be
   Rule unchanged: **test these by running them, not by reading them.**
 - **Phase 5 (hosted)** — accounts, quotas, per-tenant isolation. Not started.
   `owner_id` scoping already exists throughout, so it is additive.
-- **The editor cannot start a training run itself** — `easyannotate train` is
-  CLI-only today. A "train on reviewed" button (local only) is the obvious
-  next step for the loop.
+- **Train/Predict buttons exist** (local only) but have not been clicked
+  through with the real trainer; `loop.train` on the GPU has, from Python.
 - **The user has not yet used the editor properly.** The plan ranks "editor
   feel" as risk #1. Their feedback outranks new features.
 
@@ -92,10 +108,14 @@ index, retiring keeps the slot, new classes append. It used to be
 - **Clients never send filesystem paths.** Path-kind params are *refused, not
   sanitised*. Attached projects are CLI-only for exactly this reason.
 - **One route takes a path: `POST /api/local/open`** (`routers/local.py`),
-  and only behind all four fences: a per-launch token (minted by the CLI or
-  desktop launcher, sent in the URL `#fragment`, then as `X-Local-Token`),
-  a localhost `Host`, no foreign `Origin`, and local mode (never with an API
-  key, a non-localhost bind, or `DATAFACTORY_ALLOW_ATTACHED=0`). It returns a
+  and only behind all the fences: a per-launch token (minted by the CLI or
+  desktop launcher, sent in the URL `#fragment`, then as `X-Local-Token`;
+  never inherited, never passed to a child process), a strictly parsed
+  localhost `Host`, a loopback client address, an `Origin` equal to the
+  server's own, and local mode (never with an API key, a non-localhost
+  bind, or `DATAFACTORY_ALLOW_ATTACHED=0`). While bound to loopback,
+  `LocalHostFence` refuses non-local Hosts on **every** route (DNS
+  rebinding reached attached folders through the others). It returns a
   project id. Operations still never take paths from clients -- running ops
   in place on arbitrary folders from a browser is deliberately not offered.
 - **No client names a model file.** A `.pt` is a pickle: loading it runs
