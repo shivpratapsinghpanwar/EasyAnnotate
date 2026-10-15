@@ -91,15 +91,18 @@ jobs:
         run: |
           if [ "$RUNNER_OS" = "Windows" ]; then exe=dist/EasyAnnotate/EasyAnnotate.exe; else exe=dist/EasyAnnotate/EasyAnnotate; fi
           "$exe" > launch.log 2>&1 &
+          trap 'echo "--- launch.log"; cat launch.log' EXIT
           for i in $(seq 1 60); do grep -q "interface" launch.log && break; sleep 1; done
           port=$(grep -o "127.0.0.1:[0-9]*" launch.log | head -1 | cut -d: -f2)
+          # The banner prints before the server listens; on macOS the first
+          # request lost that race (curl exit 7). Ask until it answers.
+          for i in $(seq 1 60); do curl -fs "http://127.0.0.1:$port/api/health" && break; sleep 1; done
           curl -fs "http://127.0.0.1:$port/api/health"
           # The local link and the AI-tools card: token in, install plan out.
           # tr: Windows writes the log with CRLF, and a token ending in \r is refused.
           token=$(grep -o "#token=[^ ]*" launch.log | head -1 | cut -d= -f2 | tr -d '\r')
           curl -fs -H "X-Local-Token: $token" "http://127.0.0.1:$port/api/local/tools" | grep -q '"uv":true'
           ls dist/EasyAnnotate/_internal/wheels/*.whl
-          cat launch.log
       - shell: bash
         run: |
           cd dist && if [ "$RUNNER_OS" = "Windows" ]; then 7z a -tzip "../${{ matrix.bundle }}.zip" EasyAnnotate; else zip -qr "../${{ matrix.bundle }}.zip" EasyAnnotate; fi
