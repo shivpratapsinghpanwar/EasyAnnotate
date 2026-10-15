@@ -5,8 +5,13 @@
 #   git tag v0.4.0 && git push origin v0.4.0
 #
 # PyPI uses trusted publishing: no token exists anywhere. On pypi.org each
-# project names this repository, this workflow file and the `pypi`
-# environment as its publisher, and GitHub proves the run's identity.
+# project names this repository, this workflow file and an environment as
+# its publisher, and GitHub proves the run's identity.
+#
+# One environment per project -- `pypi` for easyannotate, `pypi-tools` for
+# easyannotate-tools. With one shared identity, PyPI matched every run to
+# the first project's publisher, and that publisher may not create the
+# second project: "Non-user identities cannot create new projects".
 #
 # Guards against "one typo away from an unwanted version": the tag must equal
 # both packages' version or nothing is built; PyPI is touched only after every
@@ -137,7 +142,28 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: wheel
-          path: dist
+          path: built
+      # easyannotate-* only: easyannotate_tools-* is the next job's.
+      - run: mkdir dist && mv built/easyannotate-* dist/ && ls dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
+
+  pypi-tools:
+    needs: [pypi]   # it depends on easyannotate, so that goes first
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi-tools
+      url: https://pypi.org/project/easyannotate-tools/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: built
+      - run: mkdir dist && mv built/easyannotate_tools-* dist/ && ls dist
       - uses: pypa/gh-action-pypi-publish@release/v1
         with:
           packages-dir: dist/
