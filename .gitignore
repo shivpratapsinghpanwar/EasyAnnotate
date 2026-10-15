@@ -36,3 +36,6 @@ desktop.ini
 # Agent scratch: session settings and worktree stubs. Machine-local,
 # and nothing here belongs to anyone but this checkout.
 .claude/
+
+# Machine-specific notes for Claude Code. Never committed.
+CLAUDE.local.md
