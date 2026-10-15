@@ -3,7 +3,7 @@ name = "easyannotate-tools"
 version = "0.4.0"
 description = "Model-backed helpers for EasyAnnotate: SAM 2 masks, text-prompted detection, inference. Runs as a sidecar in its own environment."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = { text = "MIT" }
 authors = [{ name = "Shivpratap Singh Panwar" }]
 
@@ -14,6 +14,11 @@ dependencies = [
     "easyannotate>=0.4.0",
     "ultralytics>=8.3",
 ]
+
+[project.urls]
+Homepage = "https://shivpratapsinghpanwar.github.io/EasyAnnotate/"
+Source = "https://github.com/shivpratapsinghpanwar/EasyAnnotate/tree/main/tools"
+Issues = "https://github.com/shivpratapsinghpanwar/EasyAnnotate/issues"
 
 [build-system]
 requires = ["hatchling"]

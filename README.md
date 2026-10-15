@@ -1,6 +1,6 @@
 # EasyAnnotate
 
-![EasyAnnotate: draw, name a class, review a model's predictions, export](docs/demo.gif)
+![EasyAnnotate: draw, name a class, review a model's predictions, export](https://raw.githubusercontent.com/shivpratapsinghpanwar/EasyAnnotate/main/docs/demo.gif)
 
 **Image annotation with nothing to set up.** Open a folder, draw a box, type a
 class name — that is the whole workflow. Load a model's predictions and review
@@ -178,7 +178,7 @@ easyannotate serve                 # opens http://localhost:8765
 
 Drop in a zip, it detects the format, and every operation appears as a form
 generated from the same declaration the CLI reads. Binds to `127.0.0.1` only.
-The same code hosts the service — see [DEPLOYING.md](DEPLOYING.md).
+The same code hosts the service — see [DEPLOYING.md](https://github.com/shivpratapsinghpanwar/EasyAnnotate/blob/main/DEPLOYING.md).
 
 ---
 

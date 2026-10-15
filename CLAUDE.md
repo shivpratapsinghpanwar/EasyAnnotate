@@ -45,7 +45,8 @@ this computer -- the token-fenced local link opens folders from the front
 page; (2) headless -- the public `easyannotate` library (`ea.open_folder`)
 and `serve --headless`; (3) the desktop app, which carries uv and both
 wheels so "Install AI tools" works with no Python, plus Train/Predict in the
-editor. The showcase site is `site/` (Pages workflow skips while private).
+editor. The showcase site is `site/`, live at
+https://shivpratapsinghpanwar.github.io/EasyAnnotate/ (`pages.yml`).
 
 AI tools live in `tools/` as the separate `easyannotate-tools` distribution,
 installed into `~/.datafactory/tools` (`easyannotate tools install --source .`
@@ -87,8 +88,9 @@ index, retiring keeps the slot, new classes append. It used to be
   has never run**: no tag yet. Its desktop smoke test was run by hand on
   Windows against a local PyInstaller build. macOS produces a folder, not
   a `.app`.
-- **PyPI publish** (both `easyannotate` and `easyannotate-tools`) and
-  **making the repo public** — the owner's calls, not yet made. The wheel (`uv build`) installs into a clean venv and runs; the
+- **The repository is public** (since 2026-10-15). **PyPI** publishes from
+  `release.yml` by trusted publishing (no token anywhere): the `pypi` job,
+  environment `pypi`, after every platform builds. The wheel (`uv build`) installs into a clean venv and runs; the
   PyInstaller binary (`pyinstaller packaging/easyannotate.spec`) boots and
   serves the editor. Docker is CI-tested but has not run on this machine.
   Rule unchanged: **test these by running them, not by reading them.**

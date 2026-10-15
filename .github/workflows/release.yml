@@ -1,13 +1,16 @@
 # A version tag builds everything a user can download and attaches it to a
 # GitHub Release: the wheel and sdist, and a desktop bundle per platform.
+# Then it publishes easyannotate and easyannotate-tools to PyPI.
 #
-#   git tag v0.4.0 && git push --tags
+#   git tag v0.4.0 && git push origin v0.4.0
 #
-# Publishing to PyPI is deliberately a separate, manual step: `uv publish`
-# from the dist/ artifact, by the owner, once. That artifact holds both
-# easyannotate and easyannotate-tools -- publish both, or `tools install`
-# has nothing to fetch. A release that goes to PyPI
-# automatically on every tag is one typo away from an unwanted version.
+# PyPI uses trusted publishing: no token exists anywhere. On pypi.org each
+# project names this repository, this workflow file and the `pypi`
+# environment as its publisher, and GitHub proves the run's identity.
+#
+# Guards against "one typo away from an unwanted version": the tag must equal
+# both packages' version or nothing is built; PyPI is touched only after every
+# platform built; and a re-run skips files PyPI already has.
 #
 # The desktop bundles are unsigned here. Windows SmartScreen and macOS
 # Gatekeeper will warn until a code-signing certificate and an Apple
@@ -30,6 +33,16 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.12"
+      # The tag says which version this is; both packages must agree.
+      - shell: bash
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          for file in pyproject.toml tools/pyproject.toml; do
+            version=$(grep -m1 '^version = ' "$file" | cut -d'"' -f2)
+            if [ "$version" != "$tag" ]; then
+              echo "::error::tag $GITHUB_REF_NAME but $file says $version"; exit 1
+            fi
+          done
       - run: uv build
       # The AI tools ship as their own distribution, versioned with the editor;
       # `easyannotate tools install` fetches it from PyPI once both are up.
@@ -108,3 +121,21 @@ jobs:
             artifacts/wheel/*
             artifacts/*/*.zip
           generate_release_notes: true
+
+  pypi:
+    needs: [wheel, desktop]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/easyannotate/
+    permissions:
+      id-token: write   # trusted publishing: the run's identity, not a token
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheel
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist/
+          skip-existing: true
