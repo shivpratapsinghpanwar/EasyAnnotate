@@ -1,16 +1,19 @@
+import argparse
 import os
 import cv2
 import xml.etree.ElementTree as ET
 
 # --- Configuration ---
+parser = argparse.ArgumentParser(description="Draw Pascal VOC boxes onto copies of the images.")
+parser.add_argument("source_folders", nargs="+", help="folders of images with their XMLs (not modified)")
+parser.add_argument("--output", required=True, help="where the drawn images go, one subfolder per source")
+args = parser.parse_args()
+
 # Your original source paths (These will NOT be modified)
-source_folders = {
-  
-    "Dorsal_and_Front_View":r"D:\U_V\py_files_PProcessing\Data\merged_views\Dorsal_and_Front_View"
-}
+source_folders = {os.path.basename(os.path.normpath(p)): p for p in args.source_folders}
 
 # The new location where visualized images will be saved
-output_base = r"D:\U_V\py_files_PProcessing\Data\merged_views\Dorsal_and_Front_View\drawn"
+output_base = args.output
 image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
 box_color = (0, 255, 0)  # Bright Green
 thickness = 2

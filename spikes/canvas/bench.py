@@ -19,8 +19,9 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-PAGE = Path(r"C:\Users\shivpratap.panwar\.claude\jobs\7eb2138f\tmp\canvas_spike.html").as_uri()
-SHOTS = Path(r"C:\Users\shivpratap.panwar\.claude\jobs\7eb2138f\tmp\demo")
+HERE = Path(__file__).resolve().parent
+PAGE = (HERE / "spike.html").as_uri()
+SHOTS = HERE / "shots"
 BUDGET_MS = 16.7
 
 

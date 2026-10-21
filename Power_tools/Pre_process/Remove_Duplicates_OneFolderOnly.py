@@ -1,10 +1,13 @@
+import argparse
 import os
 import shutil
 from PIL import Image
 import imagehash
 
 # --- Configuration ---
-master_folder = r"D:\Data_factory\Project_Door\Internet_Images\pairs"
+parser = argparse.ArgumentParser(description="Move visually similar images into a duplicates subfolder.")
+parser.add_argument("master_folder", help="folder of images to de-duplicate")
+master_folder = parser.parse_args().master_folder
 duplicates_folder = os.path.join(master_folder, "duplicatess_10")
 
 # Create the duplicates folder if it doesn't exist

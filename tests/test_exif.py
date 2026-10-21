@@ -6,7 +6,7 @@ operation in this package do not. So a person draws a box on the *displayed*
 image and we record it against the *stored* dimensions -- rotated 90 degrees
 from the pixels a trainer will load, with nothing anywhere reporting an error.
 
-Not currently live: all 3,000 sampled Project_Door images are orientation 1.
+Not currently live: all 3,000 sampled door-dataset images are orientation 1.
 It arrives with the first phone photo, which is exactly what a public
 annotation tool receives. These tests build the tagged images the real data
 has never contained.

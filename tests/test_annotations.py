@@ -134,7 +134,7 @@ class TestCocoBuilder:
         for annotation in self._two_spellings():
             builder.add(annotation)
         document = builder.build()
-        # This is the Project_Door V3 defect: four classes where there are two.
+        # This is the door dataset's V3 defect: four classes where there are two.
         assert len(document["categories"]) == 1
         assert builder.categories.merges() == {"Open": ["Open", "open"]}
 

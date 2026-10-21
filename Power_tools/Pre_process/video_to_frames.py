@@ -1,10 +1,17 @@
+import argparse
 import cv2
 import os
 
 # ========= CONFIG =========
-video_path = "D:\Client_data\Archive 2\WhatsApp Video 2026-05-07 at 16.46.30.mp4"   # path to your video
-output_folder = r"D:\Client_data\Archive 2\out_vid"       # folder to save frames
-save_every = 1                   # save every nth frame
+parser = argparse.ArgumentParser(description="Save the frames of a video as JPEGs.")
+parser.add_argument("video_path", help="path to your video")
+parser.add_argument("output_folder", help="folder to save frames")
+parser.add_argument("--every", type=int, default=1, help="save every nth frame (default: 1)")
+args = parser.parse_args()
+
+video_path = args.video_path
+output_folder = args.output_folder
+save_every = args.every
 # ==========================
 
 os.makedirs(output_folder, exist_ok=True)

@@ -1,3 +1,4 @@
+import argparse
 import shutil
 from pathlib import Path
 
@@ -35,9 +36,9 @@ def separate_unannotated_images(source_folder, destination_folder):
     print(f"\n Done! Successfully moved {moved_count} images without XMLs.")
 
 if __name__ == "__main__":
-    # --- EDIT THESE PATHS ---
-    # You can use relative paths (like "my_dataset") or absolute paths (like "C:/images")
-    SOURCE_DIR = r"D:\Data_factory\Project_Door\Internet_collection"
-    DEST_DIR = r"D:\Data_factory\Project_Door\Internet_collection\pairs"
-    
-    separate_unannotated_images(SOURCE_DIR, DEST_DIR)
+    parser = argparse.ArgumentParser(description="Move images that have no matching XML into another folder.")
+    parser.add_argument("source_dir", help="folder of images and XMLs")
+    parser.add_argument("dest_dir", help="where the unannotated images are moved")
+    args = parser.parse_args()
+
+    separate_unannotated_images(args.source_dir, args.dest_dir)

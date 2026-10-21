@@ -1,3 +1,4 @@
+import argparse
 import os
 import shutil
 import json
@@ -5,8 +6,12 @@ import xml.etree.ElementTree as ET
 from PIL import Image
 
 # 1. Setup paths
-source_folder = r"D:\Data_factory\Projects\Project_Fight_NonFight\Fight_person_Data_pascal_voc"
-parent_dir = r"D:\Data_factory\Projects\Project_Fight_NonFight\Finished_product\Versions\V1"
+parser = argparse.ArgumentParser(description="Build a COCO dataset from a Pascal VOC folder.")
+parser.add_argument("source_folder", help="folder of images with their Pascal VOC XMLs")
+parser.add_argument("output_dir", help="Dataset_COCO is created inside this folder")
+args = parser.parse_args()
+source_folder = args.source_folder
+parent_dir = args.output_dir
 coco_dir = os.path.join(parent_dir, "Dataset_COCO")
 coco_img_dir = os.path.join(coco_dir, "images")
 coco_ann_dir = os.path.join(coco_dir, "annotations")

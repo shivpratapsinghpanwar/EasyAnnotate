@@ -3,7 +3,7 @@
 Two behaviour changes from the original converter, both deliberate:
 
 * Categories fold case by default, so ``Open`` and ``open`` are one class. The
-  original produced four classes for Project_Door V3 where there are two.
+  original produced four classes for the door dataset's V3 where there are two.
 * ``area`` is the true polygon area when a mask exists, not the box area.
 
 Both are reported in the result, so the export never changes your data silently.

@@ -1,10 +1,13 @@
+import argparse
 import os
 import shutil
 import xml.etree.ElementTree as ET
 import cv2
 
 # 1. Ask for the source folder
-source_folder = r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door_17july_done\Door_Total"
+parser = argparse.ArgumentParser(description="Sort a Pascal VOC folder by label into clean and visualized copies.")
+parser.add_argument("source_folder", help="folder of images with their Pascal VOC XMLs")
+source_folder = parser.parse_args().source_folder
 
 # 2. Setup the Output Directories
 # These will be created in the same parent directory as your source folder

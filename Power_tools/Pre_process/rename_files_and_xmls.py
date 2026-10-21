@@ -1,13 +1,19 @@
+import argparse
 import os
 import shutil
 
 # ========= CONFIG =========
-folder_path = r"D:\Data_factory\Project_Door\Internet_Images\pairs"
+parser = argparse.ArgumentParser(description="Rename image/XML pairs to <prefix><number>.")
+parser.add_argument("folder_path", help="folder of images and XMLs")
+parser.add_argument("--prefix", required=True, help="name prefix, e.g. img -> img1.jpg, img1.xml")
+parser.add_argument("--start", type=int, default=1, help="first number to use (default: 1)")
+args = parser.parse_args()
+folder_path = args.folder_path
 
 image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 
-prefix = "Door"   
-start_index = 2783
+prefix = args.prefix
+start_index = args.start
 # ==========================
 
 # Get all XML files

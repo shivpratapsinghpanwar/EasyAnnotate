@@ -140,7 +140,7 @@ class TestSort:
 
 class TestCocoExport:
     def test_case_variants_collapse_to_one_class(self, dataset: Path):
-        """The Project_Door V3 defect: four classes exported where there are two."""
+        """The door dataset's V3 defect: four classes exported where there are two."""
         output = dataset.parent / "coco"
         result = df.run("export.coco", {"folder": dataset, "output": output})
 

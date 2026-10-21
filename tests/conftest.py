@@ -123,7 +123,7 @@ def make_pair(folder: Path, stem: str, label: str, seed: int, **kwargs) -> tuple
 
 @pytest.fixture
 def dataset(tmp_path: Path) -> Path:
-    """A small dataset carrying every defect the real Project_Door set had.
+    """A small dataset carrying every defect the real door dataset had.
 
     Contents: case-variant classes, both polygon dialects, a hard negative, an
     exact duplicate, an orphan image, an orphan label, and a corrupt XML.

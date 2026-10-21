@@ -2,7 +2,7 @@
 
 Perceptual dedup needs "find everything within N bits of this hash". Doing that
 by comparing every image to every kept image is O(n^2): on the 15k-image
-Project_Door set that is ~112 million comparisons, which is why the original
+door dataset that is ~112 million comparisons, which is why the original
 script was only ever run on small folders.
 
 A BK-tree exploits the triangle inequality -- Hamming distance is a metric, so

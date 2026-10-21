@@ -6,7 +6,7 @@ someone else, or from a web backend, without anyone remembering the order.
 
     name: door-v4
     vars:
-      root: D:/Data_factory/Projects/Project_Door/working
+      root: ./datasets/doors/working
     steps:
       - op: clean.orphans
         with: {folder: "${root}", scope: labels, action: delete}

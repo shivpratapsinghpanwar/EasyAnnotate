@@ -1,7 +1,10 @@
+import argparse
 import os
 
 # ========= CONFIG =========
-folder_path = r"D:\Data_factory\Project_Door\Internet_Images\pairs"
+parser = argparse.ArgumentParser(description="Delete images without an XML and XMLs without an image.")
+parser.add_argument("folder_path", help="folder of images and XMLs")
+folder_path = parser.parse_args().folder_path
 image_extensions = {".jpg", ".jpeg", ".png", ".bmp", ".webp"}
 xml_extension = ".xml"
 # ==========================

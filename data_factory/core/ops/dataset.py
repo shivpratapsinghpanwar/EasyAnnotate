@@ -2,7 +2,7 @@
 
 The README listed train/test splitting as a supported capability but no script
 ever implemented it. It is implemented here, and stratified by default -- an
-unstratified random split of an imbalanced set (Project_Door has ~200 hard
+unstratified random split of an imbalanced set (the door dataset has ~200 hard
 negatives against ~3500 positives) can easily land almost every negative in one
 side and skew the evaluation.
 """

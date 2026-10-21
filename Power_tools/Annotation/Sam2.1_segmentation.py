@@ -1,3 +1,4 @@
+import argparse
 import cv2
 import numpy as np
 import os
@@ -7,11 +8,21 @@ import multiprocessing
 import queue
 
 # --- CONFIGURATION ---
-IMAGE_DIR = r"D:\Data_factory\Project_Door\Internet_collection\duplicatess"
-OUTPUT_DIR = r"D:\Data_factory\Project_Door\Internet_collection\duplicatess\Mask"
-MODEL_CFG = r"D:\Data_factory\Models\Sam2.1_tiny\sam2.1_hiera_t.yaml"
-MODEL_WEIGHTS = r"D:\Data_factory\Models\Sam2.1_tiny\sam2.1_hiera_tiny.pt"
-DEVICE = "cpu"
+# Parsed at module level on purpose: the spawned worker re-imports this file
+# and gets the same sys.argv, so it sees the same paths.
+parser = argparse.ArgumentParser(description="Box-prompted SAM 2.1 annotator.")
+parser.add_argument("image_dir", help="folder of images to annotate")
+parser.add_argument("--output", help="folder for the XMLs (default: <image_dir>/Mask)")
+parser.add_argument("--model-cfg", required=True, help="SAM 2.1 config, e.g. sam2.1_hiera_t.yaml")
+parser.add_argument("--weights", required=True, help="SAM 2.1 checkpoint, e.g. sam2.1_hiera_tiny.pt")
+parser.add_argument("--device", default="cpu")
+args = parser.parse_args()
+
+IMAGE_DIR = args.image_dir
+OUTPUT_DIR = args.output or os.path.join(IMAGE_DIR, "Mask")
+MODEL_CFG = args.model_cfg
+MODEL_WEIGHTS = args.weights
+DEVICE = args.device
 
 
 DISPLAY_HEIGHT = 800  

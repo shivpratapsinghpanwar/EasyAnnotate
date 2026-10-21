@@ -60,7 +60,7 @@ def image_size(path: Path) -> tuple[int, int]:
     relative to the image the annotator drew on and the trainer loads, with
     nothing anywhere reporting an error.
 
-    Verified on the current Project_Door data: 3,000 of 3,000 images are
+    Verified on the current door dataset: 3,000 of 3,000 images are
     orientation 1, so nothing is corrupt today. It arrives with the first phone
     photo a public tool receives.
     """

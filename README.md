@@ -454,7 +454,7 @@ consumer; a web API is another.
 
 ## What it catches
 
-Run on the real Project_Door V3 set (3,686 images, 3,871 objects):
+Run on the real door dataset, V3 (3,686 images, 3,871 objects):
 
 ```
 $ easyannotate inspect.health --folder ./pascal_voc
@@ -582,7 +582,7 @@ downloads); `easyannotate train` on 4 reviewed images, 3 epochs, then
 predicting 20 more: 16 s end to end.
 
 Decode-bound stages run across threads, in input order, so results stay
-reproducible. Measured on the real Project_Door set:
+reproducible. Measured on the real door dataset:
 
 | Stage | Serial | Parallel | |
 |---|---|---|---|
@@ -666,7 +666,7 @@ not batch operations.
 
 - **COCO exported four classes where there were two.** Categories were keyed on
   the raw XML string, so `Open` and `open` became separate classes — splitting
-  Project_Door V3 as 1341/1385/645/500. Export now folds case by default and
+  the door dataset's V3 as 1341/1385/645/500. Export now folds case by default and
   *reports* every merge; `labels.rename --fold-case` fixes it at the source, and
   `inspect.health` now flags it as an error before you get that far.
 - **SAM polygons exported as empty masks.** The two annotation tools write
@@ -713,6 +713,6 @@ landed, which is the failure that silently ruins a dataset.
 
 ## Datasets in this repository
 
-`Projects/Project_Door/` holds the door-state dataset (V3: 3686 images, 3871
+`Projects/` holds the door-state dataset (V3: 3686 images, 3871
 objects) and `Models/Sam2.1_tiny/` the SAM 2.1 tiny checkpoint. Neither is
 tracked by git.

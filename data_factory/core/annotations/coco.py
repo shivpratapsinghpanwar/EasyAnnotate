@@ -3,7 +3,7 @@
 The category handling here is deliberate. The original converter keyed
 categories on the raw XML string, so a dataset whose labels drifted between
 ``Open`` and ``open`` came out with four classes instead of two -- exactly what
-happened to Project_Door V3 (Close/Open/open/close split 1341/1385/645/500).
+happened to the door dataset's V3 (Close/Open/open/close split 1341/1385/645/500).
 The builder now folds case by default and reports every merge it made, so the
 drift is fixed *and* visible rather than silently baked into the export.
 """

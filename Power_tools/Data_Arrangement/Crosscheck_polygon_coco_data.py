@@ -1,10 +1,13 @@
+import argparse
 import os
 import xml.etree.ElementTree as ET
 import cv2
 import numpy as np
 
 # 1. Ask for the source folder
-source_folder = r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door_17july_done\Door_Total"
+parser = argparse.ArgumentParser(description="Draw polygons or boxes from Pascal VOC XMLs into two review folders.")
+parser.add_argument("source_folder", help="folder of images with their Pascal VOC XMLs")
+source_folder = parser.parse_args().source_folder
 
 # 2. Setup the two Output Directories
 parent_dir = os.path.dirname(source_folder)

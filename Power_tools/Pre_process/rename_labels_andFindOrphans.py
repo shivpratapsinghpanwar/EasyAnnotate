@@ -1,14 +1,18 @@
+import argparse
 import os
 import shutil
 import xml.etree.ElementTree as ET
 
 # --- Configuration ---
-target_folder = r'D:\Clubfoot_Precheck_Data\merged_views\Plantar_View'
+parser = argparse.ArgumentParser(description="Move orphaned images/XMLs aside and rename labels in the rest.")
+parser.add_argument("target_folder", help="folder of images and Pascal VOC XMLs")
+parser.add_argument("--rename", action="append", default=[], metavar="OLD=NEW",
+                    help="label to rename; repeat for several")
+args = parser.parse_args()
+target_folder = args.target_folder
 
 # Label Mapping: "Old Label": "New Label"
-label_map = {
-    "planter_View":"Planter_View" # Added this in case you have plurals here too
-}
+label_map = dict(pair.split("=", 1) for pair in args.rename)
 
 image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
 

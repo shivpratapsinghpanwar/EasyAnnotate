@@ -1,27 +1,20 @@
+import argparse
 import os
 import shutil
 import hashlib
 from pathlib import Path
 
 # --- Configuration ---
-# Add all your folder paths here
-source_folders = [
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\useful",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\13_july",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\test\Closed",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\test\Open",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\test\Semi",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\train\Closed",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\train\Open",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\train\Semi",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\valid\Closed",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\valid\Open",
-    r"C:\Users\shivpratap.panwar\Desktop\safe_house\Door\valid\Semi",
+parser = argparse.ArgumentParser(description="Move exact-duplicate images (and their XMLs) found across folders.")
+parser.add_argument("source_folders", nargs="+", help="folders to scan, in order; the first copy seen is kept")
+parser.add_argument("--dump", required=True, help="folder the duplicates are moved to")
+args = parser.parse_args()
 
-]
-    
+# Add all your folder paths here
+source_folders = args.source_folders
+
 # Where to put the duplicates
-duplicate_dump_path = r"C:\Users\shivpratap.panwar\Desktop\safe_house\Duplicates"
+duplicate_dump_path = args.dump
 
 image_extensions = ('.jpg', '.jpeg', '.png', '.bmp')
 

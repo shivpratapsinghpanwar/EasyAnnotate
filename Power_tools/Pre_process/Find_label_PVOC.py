@@ -1,3 +1,4 @@
+import argparse
 import os
 import xml.etree.ElementTree as ET
 from collections import Counter
@@ -5,7 +6,9 @@ from collections import Counter
 # ==========================
 # CONFIG
 # ==========================
-folder_path = r"D:\Data_factory\Projects\Project_Fight_NonFight\Fight_person_Data_pascal_voc"
+parser = argparse.ArgumentParser(description="Count the labels in a folder of Pascal VOC XMLs.")
+parser.add_argument("folder_path", help="folder searched recursively for XMLs")
+folder_path = parser.parse_args().folder_path
 # ==========================
 print("starting: 1")
 label_counter = Counter()  

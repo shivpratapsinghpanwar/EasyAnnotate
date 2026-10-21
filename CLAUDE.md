@@ -146,5 +146,5 @@ easyannotate train <folder>       # reviewed -> model -> predictions on the rest
 python -m pytest                  # 782; 32 browser tests skip without playwright
 ```
 
-Real data lives in `Projects/Project_Door/` (15,514 images, gitignored). The V3
+Real data lives under `Projects/` (the door dataset, 15,514 images, gitignored). The V3
 set carries a genuine defect: case-variant classes `Close/close/Open/open`.
