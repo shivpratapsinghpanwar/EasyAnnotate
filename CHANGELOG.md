@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- Polygons are drawn as masks: a light fill in the class colour under the
+  outline, so what a segmentation covers reads at a glance.
+- The README and site show the real editor on public-domain photos:
+  `docs/demo.gif` (draw, SAM, text prompts, review) and
+  `docs/segmentation.gif` (SAM masks), recorded by `docs/make_demo_gif.py`.
+
 ## 0.4.0 — first public release
 
 The tool is now called **EasyAnnotate**: `pip install easyannotate`,

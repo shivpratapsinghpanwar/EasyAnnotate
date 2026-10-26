@@ -307,6 +307,9 @@ Then the Assist panel appears in the editor:
 
 - **Outline (SAM)** — drag a box, or click, on an object: SAM 2.1 traces it
   and you get a simplified polygon with draggable vertices.
+
+  ![Segmentation with SAM 2.1: a car from one rough box, three dogs from one click each, three people from a box each, every one a filled mask](https://raw.githubusercontent.com/shivpratapsinghpanwar/EasyAnnotate/main/docs/segmentation.gif)
+
 - **Find every…** — type a class name (or several: `door, handle`) and run it
   on this image, or on *every unreviewed image* as a job. The results are
   predictions: dashed, scored, filtered by the slider, accepted with `A`,

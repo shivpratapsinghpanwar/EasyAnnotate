@@ -84,6 +84,15 @@ export function draw(ctx, rect, scene, view, mips, options = {}) {
       if (selected) drawVertices(ctx, shape.polygon, colour, unit);
     } else if (shape.polygon && shape.polygon.length >= 3) {
       tracePath(ctx, shape.polygon, true);
+      // A mask is a region, not a wire: a light fill in the class colour
+      // shows what it covers at a glance, and the photo still shows through.
+      if (kind === "polygon") {
+        const alpha = ctx.globalAlpha;
+        ctx.globalAlpha = alpha * (selected ? 0.3 : 0.22);
+        ctx.fillStyle = colour;
+        ctx.fill();
+        ctx.globalAlpha = alpha;
+      }
       ctx.stroke();
       if (selected) drawVertices(ctx, shape.polygon, colour, unit);
       if (selected && kind === "obb") drawRotationHandle(ctx, shape, colour, unit, view.scale);

@@ -1,11 +1,14 @@
-"""Record docs/demo.gif (and docs/demo.mp4) from the real editor, real models, real photos.
+"""Record the README films from the real editor, real models, real photos.
+
+    docs/demo.gif / .mp4           draw, SAM, text prompts on every image, review
+    docs/segmentation.gif / .mp4   SAM masks: one box or one click per object
 
 Not a mock-up: it boots the service on the CC0 photos in docs/demo_photos/,
 drives the page with Playwright, and writes the frames it saw. The AI steps
 are the real SAM 2.1 and YOLO-World, so the tools must be installed:
 
     easyannotate tools install --source .        # once
-    uv run --with imageio-ffmpeg python docs/make_demo_gif.py
+    uv run --with imageio-ffmpeg python docs/make_demo_gif.py [demo|segmentation|all]
 
 ffmpeg comes from imageio-ffmpeg (or PATH): its two-pass palette is what lets a
 GIF of photographs look like photographs at a size a README can carry.
@@ -24,10 +27,6 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 PHOTOS = HERE / "demo_photos"
-GIF = HERE / "demo.gif"
-MP4 = HERE / "demo.mp4"
-ORDER = ["walking-the-dog", "crosswalk", "sidewalk-dogs", "dog-walkers",
-         "cafe-corner", "parked-cars", "play-street", "police-car"]
 WIDTH, HEIGHT, SCALE = 1280, 760, 1.5     # CSS viewport; screenshots at 1.5x
 OUT_WIDTH = 960                            # what a README shows
 
@@ -95,6 +94,7 @@ class Film:
     """Screenshots with how long each is held, then encoded once at the end."""
 
     def __init__(self, page, folder: Path) -> None:
+        folder.mkdir(parents=True, exist_ok=True)
         self.page, self.folder, self.shots = page, folder, []
         self.x, self.y = WIDTH / 2, HEIGHT / 2
 
@@ -147,13 +147,66 @@ class Film:
         self.page.wait_for_function(f"window.__editor.scene.order.length > {more_than}", timeout=120_000)
 
 
-def record(page, film: Film, project_id: str) -> None:
+def open_editor(page, film: Film, project_id: str) -> None:
     page.goto(f"http://127.0.0.1:8798/annotate?project={project_id}", wait_until="networkidle")
     page.wait_for_function("window.__editor && window.__editor.image")
     page.wait_for_function("!document.getElementById('tools').hidden", timeout=120_000)
     page.wait_for_timeout(800)
     film.page.mouse.move(film.x, film.y)
     film.shoot(1500)
+
+
+def new_class(page, film: Film, name: str) -> None:
+    """No schema step: "/", type the name, Enter -- it exists."""
+    page.keyboard.press("/")
+    film.shoot(150)
+    film.type(name)
+    page.keyboard.press("Enter")
+    film.shoot(200)
+
+
+def sam(page, film: Film, *, box=None, point=None, hold_ms: int = 700) -> None:
+    """One SAM call through the armed tool, filmed until its mask is drawn."""
+    before = film.shapes()
+    if box:
+        film.drag(*box)
+    else:
+        film.click(*point, hold_ms=60)
+    film.shoot(150)
+    film.wait_for_shapes(before)
+    page.wait_for_timeout(250)
+    film.shoot(hold_ms)
+
+
+def record_segmentation(page, film: Film, project_id: str) -> None:
+    open_editor(page, film, project_id)
+
+    # A car from one rough box.
+    new_class(page, film, "car")
+    film.click(*film.center_of("#tools button[data-tool='sam.box']"), hold_ms=150)
+    sam(page, film, box=(330, 252, 1024, 576), hold_ms=250)
+    film.glide(90, 470, frames=6)  # off the photo: the editor's guides follow the pointer
+    film.shoot(1400)
+
+    # Next photo: three dogs from one click each, three people from a box each.
+    film.click(*film.center_of(".strip-item:nth-child(2)"), hold_ms=100)
+    page.wait_for_function("window.__editor.image && window.__editor.image.name.includes('sidewalk-dogs')")
+    page.wait_for_timeout(500)
+    film.shoot(900)
+    new_class(page, film, "dog")
+    film.click(*film.center_of("#tools button[data-tool='sam.point']"), hold_ms=150)
+    for point in [(268, 520), (976, 508), (878, 500)]:
+        sam(page, film, point=point, hold_ms=500)
+    new_class(page, film, "person")
+    film.click(*film.center_of("#tools button[data-tool='sam.box']"), hold_ms=150)
+    for box in [(506, 270, 650, 586), (640, 254, 770, 636), (758, 280, 898, 636)]:
+        sam(page, film, box=box, hold_ms=450)
+    film.glide(90, 640, frames=5)
+    film.shoot(2400)
+
+
+def record_demo(page, film: Film, project_id: str) -> None:
+    open_editor(page, film, project_id)
 
     # 1. No setup: name a class by typing it, then draw. The dog.
     page.keyboard.press("/")
@@ -224,7 +277,7 @@ def record(page, film: Film, project_id: str) -> None:
     film.shoot(1600)
 
 
-def encode(film: Film) -> None:
+def encode(film: Film, gif: Path, mp4: Path) -> None:
     exe = ffmpeg()
     listing = film.folder / "frames.txt"
     lines = []
@@ -240,25 +293,42 @@ def encode(film: Film) -> None:
         "-vf", f"scale={OUT_WIDTH}:-1:flags=lanczos,split[a][b];"
                "[a]palettegen=max_colors=256:stats_mode=diff[p];"
                "[b][p]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle",
-        "-loop", "0", str(GIF),
+        "-loop", "0", str(gif),
     ], check=True, cwd=film.folder)
     subprocess.run(common + [
         "-vf", "scale=1280:-2:flags=lanczos,format=yuv420p", "-fps_mode", "vfr",
-        "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-movflags", "+faststart", str(MP4),
+        "-c:v", "libx264", "-preset", "slow", "-crf", "22", "-movflags", "+faststart", str(mp4),
     ], check=True, cwd=film.folder)
 
 
-def main() -> None:
-    folder = work / "street"
+#: name -> (photos in strip order, what happens on film)
+FILMS = {
+    "demo": (["walking-the-dog", "crosswalk", "sidewalk-dogs", "dog-walkers",
+              "cafe-corner", "parked-cars", "play-street", "police-car"], record_demo),
+    "segmentation": (["police-car", "sidewalk-dogs", "dog-walkers", "cafe-corner",
+                      "walking-the-dog", "play-street"], record_segmentation),
+}
+
+
+def project_for(name: str, photos: list[str]):
+    folder = work / name
     folder.mkdir(parents=True)
-    for i, name in enumerate(ORDER):
-        shutil.copy(PHOTOS / f"{name}.jpg", folder / f"{i + 1:02d}-{name}.jpg")
-    project = attach.open_folder(get_store(), folder, name="street")["project"]
+    for i, photo in enumerate(photos):
+        shutil.copy(PHOTOS / f"{photo}.jpg", folder / f"{i + 1:02d}-{photo}.jpg")
+    return attach.open_folder(get_store(), folder, name="street")["project"]
+
+
+def main() -> None:
+    wanted = sys.argv[1] if len(sys.argv) > 1 else "all"
+    names = list(FILMS) if wanted == "all" else [wanted]
+    if any(name not in FILMS for name in names):
+        sys.exit(f"which film? {' | '.join(FILMS)} | all")
+    projects = {name: project_for(name, FILMS[name][0]) for name in names}
 
     if {"sam.box", "detect.text"} - {spec.name for spec in REGISTRY.available()}:
         sys.exit("the AI tools are not installed: easyannotate tools install")
-    # Load both models before the first frame: the film is about using them.
-    warm = str(folder / f"{len(ORDER):02d}-{ORDER[-1]}.jpg")
+    # Load both models before the first frame: the films are about using them.
+    warm = str(PHOTOS / "parked-cars.jpg")
     REGISTRY.invoke_waiting("sam.box", {"image_id": "warm", "image_path": warm, "box": [400, 300, 1200, 900],
                                         "width": 1600, "height": 1200}, budget_s=900)
     REGISTRY.invoke_waiting("detect.text", {"image_id": "warm", "image_path": warm, "text": "car",
@@ -269,22 +339,25 @@ def main() -> None:
     while not server.started:
         time.sleep(0.05)
 
-    frames = work / "frames"
-    frames.mkdir()
+    films = {}
     with sync_playwright() as pw:
         browser = pw.chromium.launch()
-        page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE)
-        page.add_init_script(CURSOR)
-        film = Film(page, frames)
-        record(page, film, project.id)
+        for name in names:
+            page = browser.new_page(viewport={"width": WIDTH, "height": HEIGHT}, device_scale_factor=SCALE)
+            page.add_init_script(CURSOR)
+            films[name] = Film(page, work / "frames" / name)
+            FILMS[name][1](page, films[name], projects[name].id)
+            page.close()
         browser.close()
     server.should_exit = True
     REGISTRY.close()
 
-    encode(film)
-    seconds = sum(hold for _, hold in film.shots) / 1000
-    print(f"wrote {GIF} ({GIF.stat().st_size / 1e6:.1f} MB) and {MP4} ({MP4.stat().st_size / 1e6:.1f} MB): "
-          f"{len(film.shots)} frames, {seconds:.1f} s")
+    for name, film in films.items():
+        gif, mp4 = HERE / f"{name}.gif", HERE / f"{name}.mp4"
+        encode(film, gif, mp4)
+        seconds = sum(hold for _, hold in film.shots) / 1000
+        print(f"wrote {gif.name} ({gif.stat().st_size / 1e6:.1f} MB) and {mp4.name} "
+              f"({mp4.stat().st_size / 1e6:.1f} MB): {len(film.shots)} frames, {seconds:.1f} s")
 
 
 if __name__ == "__main__":
