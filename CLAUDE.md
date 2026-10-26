@@ -37,7 +37,7 @@ M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
 binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
 text prompts, batch prompt → predictions, SAM encode-ahead), M4 (the loop:
 `easyannotate train/predict`, uncertainty-ordered review queue) and the
-rotated-box/line/point half of M5.** 782 tests pass, including 32 browser tests
+rotated-box/line/point half of M5.** 788 tests pass, including 32 browser tests
 (install playwright). `docs/bench_scale.py` measures 20k images: all gates pass.
 
 **Three front ends, as the owner asked (Oct 2026):** (1) the browser bound to
@@ -49,8 +49,8 @@ editor. The showcase site is `site/`, live at
 https://shivpratapsinghpanwar.github.io/EasyAnnotate/ (`pages.yml`).
 
 AI tools live in `tools/` as the separate `easyannotate-tools` distribution,
-installed into `~/.datafactory/tools` (`easyannotate tools install --source .`
-from a checkout). Tests set `DATAFACTORY_TOOLS_HOME` to an empty dir so they
+installed into `~/.datafactory/tools` by `easyannotate tools install` (from
+PyPI, pinned to the editor's version; `--source .` from a checkout). Tests set `DATAFACTORY_TOOLS_HOME` to an empty dir so they
 never start the real sidecar. The real models were driven through the
 editor in a browser from cold (CLIP's 338 MB download included: 46 s to the
 first text-prompt result), and `easyannotate train` ran for real on CPU (it
@@ -84,13 +84,19 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **`release.yml`
-  has never run**: no tag yet. Its desktop smoke test was run by hand on
-  Windows against a local PyInstaller build. macOS produces a folder, not
+- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **v0.4.0 is
+  released** by `release.yml` (tag `v0.4.0`): desktop zips for Windows, macOS
+  and Linux, each smoke-tested in CI, unsigned. macOS produces a folder, not
   a `.app`.
-- **The repository is public** (since 2026-10-15). **PyPI** publishes from
-  `release.yml` by trusted publishing (no token anywhere): the `pypi` job,
-  environment `pypi`, after every platform builds. The wheel (`uv build`) installs into a clean venv and runs; the
+- **The repository is public** (since 2026-10-15). **Both packages are on
+  PyPI**, published from `release.yml` by trusted publishing (no token
+  anywhere), each from its own job and GitHub environment, approved by the
+  owner: job `pypi` → environment `pypi` → project `easyannotate`; job
+  `pypi-tools` → environment `pypi-tools` → project `easyannotate-tools`.
+  Keep one publisher per PyPI project, naming that environment. A
+  publisher added on a project's page can only upload to that
+  project; a new project needs a *pending* publisher from the account page.
+  The wheel (`uv build`) installs into a clean venv and runs; the
   PyInstaller binary (`pyinstaller packaging/easyannotate.spec`) boots and
   serves the editor. Docker is CI-tested but has not run on this machine.
   Rule unchanged: **test these by running them, not by reading them.**
@@ -143,7 +149,7 @@ easyannotate demo                 # sample project in the browser
 easyannotate serve                # http://localhost:8765
 easyannotate annotate <folder>    # edit a folder's labels in place
 easyannotate train <folder>       # reviewed -> model -> predictions on the rest
-python -m pytest                  # 782; 32 browser tests skip without playwright
+python -m pytest                  # 788; 32 browser tests skip without playwright
 ```
 
 Real data lives under `Projects/` (the door dataset, 15,514 images, gitignored). The V3

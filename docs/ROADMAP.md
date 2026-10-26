@@ -9,21 +9,21 @@ A weighted scorecard (0–10 per dimension, weights sum to 100) against CVAT,
 Label Studio, Roboflow, X-AnyLabeling and Labelme. EasyAnnotate is scored on
 what runs today, not on what is designed.
 
-| Dimension (weight) | Oct 2 | Oct 14 | **Oct 15** | Target | CVAT | Roboflow | X-AnyLabeling |
-|---|---|---|---|---|---|---|---|
-| Time to first box (8) | 9 | 10 | **10** | 10 | 3 | 7 | 7 |
-| Core editor (13) | 6 | 8 | **8** | 8 | 8 | 8 | 7 |
-| Annotation types (7) | 3 | 5 | **5** | 6 | 10 | 7 | 9 |
-| AI assist (13) | 2 | 7 | **8** | 8 | 8 | 9 | 10 |
-| Model-in-the-loop review (12) | 7 | 9 | **9** | 9 | 6 | 7 | 4 |
-| Data correctness & formats (10) | 8 | 9 | **9** | 9 | 8 | 9 | 8 |
-| Dataset prep & health (8) | 9 | 9 | **9** | 9 | 3 | 8 | 3 |
-| Performance at scale (6) | 5 | 8 | **8** | 7 | 7 | 7 | 6 |
-| Video (4) | 1 | 1 | **1** | 2 | 9 | 6 | 8 |
-| Collaboration (5) | 1 | 1 | **1** | 1 | 9 | 9 | 1 |
-| Privacy / local / cost (4) | 10 | 10 | **10** | 10 | 7 | 3 | 10 |
-| Maturity & distribution (10) | 1 | 1 | **2** | 6 | 10 | 10 | 8 |
-| **Total / 100** | **52** | **≈69** | **71** | **75** | **73** | **79** | **69** |
+| Dimension (weight) | Oct 2 | Oct 14 | Oct 15 | **Oct 27** | Target | CVAT | Roboflow | X-AnyLabeling |
+|---|---|---|---|---|---|---|---|---|
+| Time to first box (8) | 9 | 10 | 10 | **10** | 10 | 3 | 7 | 7 |
+| Core editor (13) | 6 | 8 | 8 | **8** | 8 | 8 | 8 | 7 |
+| Annotation types (7) | 3 | 5 | 5 | **5** | 6 | 10 | 7 | 9 |
+| AI assist (13) | 2 | 7 | 8 | **8** | 8 | 8 | 9 | 10 |
+| Model-in-the-loop review (12) | 7 | 9 | 9 | **9** | 9 | 6 | 7 | 4 |
+| Data correctness & formats (10) | 8 | 9 | 9 | **9** | 9 | 8 | 9 | 8 |
+| Dataset prep & health (8) | 9 | 9 | 9 | **9** | 9 | 3 | 8 | 3 |
+| Performance at scale (6) | 5 | 8 | 8 | **8** | 7 | 7 | 7 | 6 |
+| Video (4) | 1 | 1 | 1 | **1** | 2 | 9 | 6 | 8 |
+| Collaboration (5) | 1 | 1 | 1 | **1** | 1 | 9 | 9 | 1 |
+| Privacy / local / cost (4) | 10 | 10 | 10 | **10** | 10 | 7 | 3 | 10 |
+| Maturity & distribution (10) | 1 | 1 | 2 | **6** | 6 | 10 | 10 | 8 |
+| **Total / 100** | 52 | ≈69 | 71 | **75** | 75 | 73 | 79 | 69 |
 
 Oct 15: **AI 7→8** because the GPU path has now run on real hardware, sized by
 the installer: SAM 0.044 s a click and a new text prompt in ~1 s on a 4 GB
@@ -34,11 +34,18 @@ Train button itself has not been clicked with the real trainer. **Maturity
 1→2** because CI runs and is green on Linux and Windows, and the desktop app
 was built and smoke-tested here with its AI installer bundled.
 
-What is left, as arithmetic. **Maturity 2→6 is +4.0 and is the owner's three
-decisions**: publish both packages to PyPI (register both names first: the
-installer and the tools package refer to them), make the repo public (the
-Pages site then deploys), tag a release (release.yml has never run). That is
-75. Beyond it: image-level tags (types 5→6, +0.7) and video (1→2, +0.4).
+Oct 27: **Maturity 2→6, total 75: the target.** The owner's three
+decisions are done: the repo is public (the Pages site deployed), v0.4.0 is
+tagged and `release.yml` ran (desktop builds for Windows, macOS and Linux,
+each smoke-tested in CI, on the release page), and both packages are on PyPI
+by trusted publishing. Then `pip install easyannotate` and `easyannotate tools
+install` were run from PyPI alone, in a fresh environment with no uv and no
+git, and that found a defect: YOLO-World's CLIP was left to Ultralytics,
+which installs it with git, so text prompts failed on machines without it.
+The installer now brings CLIP itself, pinned (next release).
+
+Beyond 75: image-level tags (types 5→6, +0.7), video (1→2, +0.4), and the
+rest of maturity: signed apps, a macOS `.app`, users.
 
 Competitor scores are unchanged from the first assessment and were judged, not
 tested. Ours are judged too, but on what was run: the AI timings, the training

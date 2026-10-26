@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Text prompts work on machines without git. YOLO-World's text encoder,
+  CLIP, was left for Ultralytics to install on first use, which it does with
+  git; installed from PyPI on a machine without git, every text prompt failed
+  with "No module named 'clip'". `easyannotate tools install` (and the app's
+  button) now installs CLIP itself, from a pinned archive on github.com, as
+  a step of its own: where github.com is blocked, it warns, and outlines
+  still install.
 - Polygons are drawn as masks: a light fill in the class colour under the
   outline, so what a segmentation covers reads at a glance.
 - The README and site show the real editor on public-domain photos:

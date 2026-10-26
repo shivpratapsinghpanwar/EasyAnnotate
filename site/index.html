@@ -414,7 +414,7 @@ project.export("out/", to="yolo")
         <div class="number"><b>1.6 s</b><span>to open 20,000 images</span><small>Server start to a listed project. docs/bench_scale.py</small></div>
         <div class="number"><b>0.17 s</b><span>per SAM click, on a CPU</span><small>The image is encoded while you look at it, so a click only decodes.</small></div>
         <div class="number"><b>0.044 s</b><span>per SAM click, on a 4 GB laptop GPU</span><small>RTX 2050 with driver 529, which the installer gave PyTorch 2.7 with CUDA 11.8.</small></div>
-        <div class="number"><b>782</b><span>automated tests</span><small>Including real-browser tests of the editor. CI on Linux and Windows.</small></div>
+        <div class="number"><b>788</b><span>automated tests</span><small>Including real-browser tests of the editor. CI on Linux and Windows.</small></div>
       </div>
     </div>
   </section>
@@ -431,11 +431,13 @@ easyannotate annotate ./photos   <span class="c"># your own folder</span>
 easyannotate tools install       <span class="c"># optional: AI tools</span>
 easyannotate app                 <span class="c"># the desktop window</span></pre>
         <div class="pending released">
-          <p style="margin:0"><b>Released: 0.4.0.</b> <a href="https://pypi.org/project/easyannotate/">easyannotate is on PyPI</a>.
+          <p style="margin:0"><b>Released: 0.4.0.</b> Both packages are on PyPI:
+          <a href="https://pypi.org/project/easyannotate/">easyannotate</a>, and
+          <a href="https://pypi.org/project/easyannotate-tools/">easyannotate-tools</a>, which
+          <code>easyannotate tools install</code> fetches with the PyTorch build that suits your machine.
           Desktop apps for Windows, macOS and Linux are on the
           <a href="https://github.com/shivpratapsinghpanwar/EasyAnnotate/releases/latest">release page</a>; they are unsigned,
-          so Windows SmartScreen and macOS Gatekeeper ask once before the first run. The desktop app's
-          "Install AI tools" works now; <code>easyannotate tools install</code> from pip follows when the tools package reaches PyPI.</p>
+          so Windows SmartScreen and macOS Gatekeeper ask once before the first run.</p>
         </div>
       </div>
     </div>

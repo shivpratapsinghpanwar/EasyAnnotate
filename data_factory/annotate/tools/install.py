@@ -40,6 +40,13 @@ from .local import child_environment, python_for_tools
 PROFILE = "profile.json"
 PYTHON_VERSION = "3.12"
 
+#: YOLO-World's text encoder. Ultralytics installs it on first use, with git;
+#: measured on a fresh install from PyPI with no git on PATH, that failed and
+#: text prompts said "No module named 'clip'". The app's environment has no
+#: pip for it either. So the installer brings it: a GitHub archive, which
+#: needs no git, pinned to one commit.
+CLIP = "clip @ https://github.com/ultralytics/CLIP/archive/7ffa84b3bfa40c42ecc1c77147a855e69cb2dd40.zip"
+
 #: Run in the new environment. Real work on the device, not
 #: torch.cuda.is_available(): measured on a 529 driver with the cu126 build,
 #: that said True while every allocation failed ("device busy or unavailable").
@@ -205,6 +212,14 @@ def install(
         packages = [f"easyannotate-tools=={__version__}"]
     on_line("installing the EasyAnnotate tools and Ultralytics")
     run(pip + packages)
+    # A step of its own: a network that reaches PyPI but not github.com then
+    # loses text prompts, not the whole install.
+    on_line("installing CLIP for text prompts, from github.com")
+    try:
+        run(pip + [CLIP])
+    except InstallError:
+        on_line("warning: CLIP did not install (is github.com reachable?) -- "
+                "outlines work; text prompts will not until a reinstall")
 
     profile = {
         "device": chosen.device,

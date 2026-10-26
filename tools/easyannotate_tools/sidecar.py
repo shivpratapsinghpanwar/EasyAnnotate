@@ -187,7 +187,9 @@ def _load_world() -> Any:
     from ultralytics import YOLOWorld
 
     model = YOLOWorld(_profile().get("world") or WORLD_WEIGHTS)
-    # The first set_classes installs and loads CLIP: a 338 MB download and a
+    # The first set_classes loads CLIP (installed by `easyannotate tools
+    # install`, which pins it; left to Ultralytics it needs git): its 338 MB of
+    # weights downloaded on first use, and a
     # torch.jit.load that holds the GIL for seconds. Doing it here, on the
     # loader thread, means it happens once while the tool reports "loading",
     # not in the middle of somebody's first prompt.

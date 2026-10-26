@@ -290,9 +290,11 @@ easyannotate tools install --cpu   # skip the GPU build
 easyannotate tools status          # what this machine gets, and what is installed
 ```
 
-From a source checkout, before the first PyPI release:
-`easyannotate tools install --source .` The desktop app has the same thing
-as an "Install AI tools" button.
+The tools come from PyPI as
+[`easyannotate-tools`](https://pypi.org/project/easyannotate-tools/), pinned
+to your `easyannotate` version. From a source checkout,
+`easyannotate tools install --source .` installs your working copy instead.
+The desktop app has the same thing as an "Install AI tools" button.
 
 The installer reads the GPU, its memory and its driver. NVIDIA cards get the
 PyTorch CUDA build their driver was made for (12.8 or 12.6; PyTorch 2.7 with
