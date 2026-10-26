@@ -122,7 +122,7 @@ nav.links a:hover { color: var(--ink); }
 .window .bar { display: flex; align-items: center; gap: 10px; padding: 9px 14px;
   border-bottom: 1px solid var(--line); font: 0.78rem/1 var(--mono); color: var(--muted); }
 .window .bar b { font-weight: 500; color: var(--ink); }
-.window img { width: 100%; aspect-ratio: 960 / 570; object-fit: cover; background: var(--bg); }
+.window img, .window video { display: block; width: 100%; height: auto; aspect-ratio: 960 / 570; object-fit: cover; background: var(--bg); }
 .caption { font-size: 0.85rem; color: var(--muted); margin: 10px 2px 0; }
 
 /* ------------------------------------------------------------ ledger */
@@ -181,6 +181,7 @@ td .mono { font-size: 0.85rem; }
 .pending { border: 1px solid var(--line); border-left: 3px solid var(--warn); border-radius: 0 10px 10px 0;
   background: var(--panel); padding: 16px 18px; color: var(--muted); font-size: 0.94rem; }
 .pending b { color: var(--ink); }
+.pending.released { border-left-color: var(--ok); }
 
 footer { border-top: 1px solid var(--line); padding-block: 28px 40px; color: var(--muted); font-size: 0.88rem; }
 footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; }
@@ -221,7 +222,7 @@ footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space
       <a href="#numbers">Numbers</a>
       <a href="#get">Get it</a>
     </nav>
-    <span class="status" title="Built and tested; the PyPI upload and public repository are still to come">v0.4.0 · release pending</span>
+    <a class="status" style="color:var(--ok);text-decoration:none" href="https://pypi.org/project/easyannotate/" title="easyannotate 0.4.0 on PyPI">v0.4.0 · on PyPI</a>
   </div>
 </header>
 
@@ -242,9 +243,13 @@ footer .wrap { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space
       </div>
       <figure class="window" style="margin-inline:0">
         <div class="bar"><b>localhost:8765</b>/annotate</div>
-        <img src="demo.gif" width="960" height="570" alt="The EasyAnnotate editor: a box is drawn on a photo, named, and the next image opens.">
+        <video src="demo.mp4" width="960" height="570" autoplay muted loop playsinline preload="auto"
+               aria-label="EasyAnnotate on real photos: a box is drawn around a dog, SAM outlines a man from a rough box, a text prompt finds every person, dog and car on the other photos, and the predictions are reviewed least sure first.">
+          <img src="demo.gif" width="960" height="570" alt="EasyAnnotate on real photos: drawing, SAM outlines, text prompts and review.">
+        </video>
       </figure>
-      <p class="caption">The editor in a browser tab, served from this computer. Boxes, polygons, rotated boxes, lines and points; undo; saves as you go.</p>
+      <p class="caption">Recorded from the real editor and the real models on a 4 GB laptop GPU: a box by hand, SAM 2.1 outlining from a rough box,
+        YOLO-World finding every person, dog and car on the unreviewed photos, then review least sure first. Photos are public domain (CC0).</p>
     </div>
   </section>
 
@@ -418,10 +423,12 @@ easyannotate demo                <span class="c"># a sample project</span>
 easyannotate annotate ./photos   <span class="c"># your own folder</span>
 easyannotate tools install       <span class="c"># optional: AI tools</span>
 easyannotate app                 <span class="c"># the desktop window</span></pre>
-        <div class="pending">
-          <p style="margin:0"><b>Release pending.</b> Version 0.4.0 is built and tested. The wheels and the Windows desktop app have been built and
-          smoke-tested; the release workflow that builds every platform runs on the first version tag.
-          Publishing to PyPI and opening the repository are the last steps, so <code>pip install easyannotate</code> does not work yet.</p>
+        <div class="pending released">
+          <p style="margin:0"><b>Released: 0.4.0.</b> <a href="https://pypi.org/project/easyannotate/">easyannotate is on PyPI</a>.
+          Desktop apps for Windows, macOS and Linux are on the
+          <a href="https://github.com/shivpratapsinghpanwar/EasyAnnotate/releases/latest">release page</a>; they are unsigned,
+          so Windows SmartScreen and macOS Gatekeeper ask once before the first run. The desktop app's
+          "Install AI tools" works now; <code>easyannotate tools install</code> from pip follows when the tools package reaches PyPI.</p>
         </div>
       </div>
     </div>

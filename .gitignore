@@ -15,6 +15,9 @@ Models/
 *.mp4
 *.avi
 *.mov
+# Except the demo's own media: CC0 photos and the recording made from them.
+!docs/demo_photos/*.jpg
+!docs/demo.mp4
 
 # ── Python ────────────────────────────────────────────────────────────────
 .venv/

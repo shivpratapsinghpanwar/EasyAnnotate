@@ -14,7 +14,7 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: ["site/**", "docs/demo.gif", ".github/workflows/pages.yml"]
+    paths: ["site/**", "docs/demo.gif", "docs/demo.mp4", ".github/workflows/pages.yml"]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       # The editor demo lives in docs/ for the README; one copy in git.
-      - run: cp docs/demo.gif site/demo.gif
+      - run: cp docs/demo.gif docs/demo.mp4 site/
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,6 +1,6 @@
 # EasyAnnotate
 
-![EasyAnnotate: draw, name a class, review a model's predictions, export](https://raw.githubusercontent.com/shivpratapsinghpanwar/EasyAnnotate/main/docs/demo.gif)
+![EasyAnnotate on real photos: draw a box, outline with SAM, find every person, dog and car with a text prompt, review least sure first](https://raw.githubusercontent.com/shivpratapsinghpanwar/EasyAnnotate/main/docs/demo.gif)
 
 **Image annotation with nothing to set up.** Open a folder, draw a box, type a
 class name — that is the whole workflow. Load a model's predictions and review
