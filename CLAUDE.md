@@ -84,8 +84,8 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **v0.4.0 is
-  released** by `release.yml` (tag `v0.4.0`): desktop zips for Windows, macOS
+- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **v0.4.1 is
+  released** by `release.yml` (tag `v0.4.1`; 0.4.0 was the first public release): desktop zips for Windows, macOS
   and Linux, each smoke-tested in CI, unsigned. macOS produces a folder, not
   a `.app`.
 - **The repository is public** (since 2026-10-15). **Both packages are on

@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.1 — text prompts on machines without git
 
 - Text prompts work on machines without git. YOLO-World's text encoder,
   CLIP, was left for Ultralytics to install on first use, which it does with
