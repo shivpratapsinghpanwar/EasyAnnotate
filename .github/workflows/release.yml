@@ -2,7 +2,7 @@
 # GitHub Release: the wheel and sdist, and a desktop bundle per platform.
 # Then it publishes easyannotate and easyannotate-tools to PyPI.
 #
-#   git tag v0.4.0 && git push origin v0.4.0
+#   git tag v0.4.1 && git push origin v0.4.1
 #
 # PyPI uses trusted publishing: no token exists anywhere. On pypi.org each
 # project names this repository, this workflow file and an environment as

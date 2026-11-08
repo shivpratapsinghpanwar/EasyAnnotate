@@ -42,7 +42,7 @@ by trusted publishing. Then `pip install easyannotate` and `easyannotate tools
 install` were run from PyPI alone, in a fresh environment with no uv and no
 git, and that found a defect: YOLO-World's CLIP was left to Ultralytics,
 which installs it with git, so text prompts failed on machines without it.
-The installer now brings CLIP itself, pinned (next release).
+The installer now brings CLIP itself, pinned (shipped in 0.4.1).
 
 Beyond 75: image-level tags (types 5→6, +0.7), video (1→2, +0.4), and the
 rest of maturity: signed apps, a macOS `.app`, users.
