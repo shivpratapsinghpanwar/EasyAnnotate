@@ -71,7 +71,7 @@ What you get instead:
   arrives as a prediction to review, dashed, with a confidence slider and one
   key to accept. The models run in their own environment, so the editor's
   install never depends on PyTorch, and without them it works unchanged.
-- **Dataset tooling built in.** 28 operations — convert between five formats,
+- **Dataset tooling built in.** 28 operations — convert between six formats,
   find duplicates and train/val leakage, health reports, augmentation that
   moves the labels with the pixels — one `pip install` away.
 
@@ -441,8 +441,8 @@ remembers to do.
 preview is a faithful description of the real run, not an approximation.
 
 **Formats meet in the middle.** Readers parse into a neutral `Annotation`;
-writers serialise out of it. Five formats cost five readers and five writers,
-not twenty converters. Adding CreateML is one file, and it converts to and from
+writers serialise out of it. Six formats cost six readers and six writers,
+not thirty converters. Adding CreateML is one file, and it converts to and from
 everything already here.
 
 **Geometry is solved once.** Resize, tile and augment share one transform layer.
