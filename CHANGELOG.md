@@ -64,6 +64,13 @@ second implementation across every pair of formats.
   conversion with 11 or more classes, or with unused numbers. The same
   holds for numbers beyond the end of a `data.yaml`: they keep their place
   and the run reports them.
+- **A YOLO box that crosses the image edge is written as the part inside the
+  image.** Centre and size used to be clamped one by one, so a box from -50
+  to 50 on a 100-wide image came out centred on the edge and as wide as the
+  image; it is now centre 0.25, width 0.5. Boxes inside the image are
+  unchanged. The run counts the boxes it cut, the boxes it left out for
+  having no area inside the image (these used to vanish silently), and the
+  outlines that had points moved onto the edge.
 
 ## 0.4.1 — text prompts on machines without git
 

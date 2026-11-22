@@ -573,3 +573,59 @@ class TestDataYamlNames:
         path.write_text("names:\n  first: cat\n", encoding="utf-8")
         with pytest.raises(AnnotationError, match="data.yaml"):
             yolo.read_data_yaml(path)
+
+
+# ------------------------------------------------- YOLO boxes past the edge
+
+
+def dataset_of(*shapes: Shape, width: int = 100, height: int = 80) -> formats.Dataset:
+    annotation = Annotation("a.jpg", width, height, shapes=list(shapes))
+    return formats.Dataset(items=[formats.Item(annotation=annotation)])
+
+
+class TestYoloClipping:
+    def test_a_box_past_the_edge_becomes_its_visible_part(self, tmp_path: Path):
+        """Centre and size were clamped one by one: a box from -50 to 50 on a
+        100-wide image came out centred on the edge and as wide as the image."""
+        path = tmp_path / "a.txt"
+        annotation = Annotation("a.jpg", 100, 80, shapes=[Shape("cat", (-50, 20, 50, 60))])
+        yolo.write(annotation, path, yolo.ClassList(["cat"]))
+        assert path.read_text() == "0 0.250000 0.500000 0.500000 0.500000\n"
+
+        back = yolo.read(path, yolo.ClassList(["cat"]), 100, 80)
+        assert back.shapes[0].bbox == (0, 20, 50, 60)
+
+    def test_a_box_inside_the_image_is_written_as_before(self, tmp_path: Path):
+        path = tmp_path / "a.txt"
+        annotation = Annotation("a.jpg", 100, 80, shapes=[Shape("cat", (10, 20, 50, 60))])
+        yolo.write(annotation, path, yolo.ClassList(["cat"]))
+        assert path.read_text() == "0 0.300000 0.500000 0.400000 0.500000\n"
+
+    def test_clipped_and_dropped_boxes_are_counted(self, tmp_path: Path):
+        dataset = dataset_of(
+            Shape("cat", (-50, 20, 50, 60)),    # clipped
+            Shape("cat", (90, 70, 130, 95)),    # clipped
+            Shape("cat", (10, 10, 10, 40)),     # no area
+            Shape("cat", (120, 10, 150, 40)),   # wholly outside
+            Shape("cat", (10, 20, 50, 60)),     # fine
+        )
+        report = formats.write_dataset(dataset, tmp_path / "out", "yolo", ctx=Context())
+        warnings = [str(w) for w in report["warnings"]]
+        assert any(w.startswith("2 box(es) reach outside their image") for w in warnings)
+        assert any(w.startswith("2 box(es) have no area inside their image") for w in warnings)
+        lines = (tmp_path / "out" / "labels" / "train" / "a.txt").read_text().splitlines()
+        assert len(lines) == 3
+
+        preview = formats.write_dataset(dataset, tmp_path / "dry", "yolo", ctx=Context(dry_run=True))
+        assert preview["warnings"] == report["warnings"]
+
+    def test_a_clean_dataset_gets_no_such_warning(self, tmp_path: Path):
+        dataset = dataset_of(Shape("cat", (10, 20, 50, 60)), Shape("cat", (0, 0, 100, 80)))
+        report = formats.write_dataset(dataset, tmp_path / "out", "yolo", ctx=Context())
+        assert report["warnings"] == []
+
+    def test_an_outline_with_points_outside_is_counted_too(self, tmp_path: Path):
+        outline = [(-10, 10), (50, 10), (50, 70), (-10, 70), (20, 40)]
+        dataset = dataset_of(Shape("cat", (-10, 10, 50, 70), polygon=outline))
+        report = formats.write_dataset(dataset, tmp_path / "out", "yolo", ctx=Context())
+        assert any("1 outline(s) have points outside" in str(w) for w in report["warnings"])

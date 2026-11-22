@@ -211,13 +211,14 @@ def write(
             ]
             lines.append(f"{class_id} " + " ".join(coords))
         else:
-            xmin, ymin, xmax, ymax = shape.bbox
-            cx = _unit(((xmin + xmax) / 2.0) / width)
-            cy = _unit(((ymin + ymax) / 2.0) / height)
-            bw = _unit((xmax - xmin) / width)
-            bh = _unit((ymax - ymin) / height)
-            if bw <= 0 or bh <= 0:
+            box = visible_box(shape.bbox, width, height)
+            if box is None:
                 continue
+            xmin, ymin, xmax, ymax = box
+            cx = ((xmin + xmax) / 2.0) / width
+            cy = ((ymin + ymax) / 2.0) / height
+            bw = (xmax - xmin) / width
+            bh = (ymax - ymin) / height
             lines.append(f"{class_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
 
     return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""))
@@ -226,6 +227,43 @@ def write(
 def _unit(value: float) -> float:
     """YOLO coordinates outside 0-1 are rejected by most trainers."""
     return max(0.0, min(1.0, value))
+
+
+def visible_box(
+    bbox: tuple[int, int, int, int], width: int, height: int
+) -> tuple[int, int, int, int] | None:
+    """The part of a box that lies inside the image, or ``None`` if no part
+    with any area does.
+
+    The box is cut to the image first and converted after. Clamping the
+    centre and the size separately, which this replaces, turned a box from
+    -50 to 50 on a 100-wide image into one centred on the left edge and as
+    wide as the whole image.
+    """
+    xmin, ymin, xmax, ymax = bbox
+    left, right = max(0, min(xmin, xmax)), min(max(1, width), max(xmin, xmax))
+    top, bottom = max(0, min(ymin, ymax)), min(max(1, height), max(ymin, ymax))
+    if right <= left or bottom <= top:
+        return None
+    return left, top, right, bottom
+
+
+def fate(shape: Shape, width: int, height: int, *, segmentation: bool = True) -> str:
+    """What :func:`write` does to a shape that does not fit: ``""`` when it is
+    written as it stands, else ``"clipped"``, ``"dropped"`` or ``"outline"``
+    (an outline with points moved onto the image edge).
+
+    Uses the same geometry as the writer, so what a conversion reports and
+    what it writes cannot drift apart -- and a dry run can report it too.
+    """
+    if segmentation and shape.has_polygon:
+        assert shape.polygon is not None
+        inside = all(0 <= x <= max(1, width) and 0 <= y <= max(1, height) for x, y in shape.polygon)
+        return "" if inside else "outline"
+    box = visible_box(shape.bbox, width, height)
+    if box is None:
+        return "dropped"
+    return "" if box == tuple(shape.bbox) else "clipped"
 
 
 def write_data_yaml(

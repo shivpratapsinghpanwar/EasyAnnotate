@@ -18,6 +18,7 @@ the specifications describe:
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -611,6 +612,7 @@ def write_dataset(
                 f"{fmt} cannot store outlines: {polygons} image(s) keep their boxes "
                 f"but lose their polygons"
             )
+    warnings.extend(_write_losses(dataset, fmt, segmentation))
 
     writer = {
         "voc": _write_voc,
@@ -622,6 +624,32 @@ def write_dataset(
     }[fmt]
     writer(dataset, output, ctx, report, copy_images, segmentation, on_action)
     return report
+
+
+def _write_losses(dataset: Dataset, fmt: str, segmentation: bool) -> list[str]:
+    """What this conversion cannot keep, counted and in plain words.
+
+    Worked out from the dataset rather than reported back by the writers, so
+    a dry run -- which never calls a writer -- says exactly what the real run
+    will. Each line is one kind of loss with one number, so the handful of
+    warnings a caller shows is the whole story.
+    """
+    tally: Counter[str] = Counter()
+    for item in dataset.items:
+        annotation = item.annotation
+        for shape in annotation.shapes:
+            if fmt == "yolo":
+                tally[
+                    "yolo-"
+                    + yolo.fate(shape, annotation.width, annotation.height, segmentation=segmentation)
+                ] += 1
+
+    texts = {
+        "yolo-clipped": "box(es) reach outside their image and were cut to the part inside it",
+        "yolo-dropped": "box(es) have no area inside their image and were not written",
+        "yolo-outline": "outline(s) have points outside their image, which were moved onto its edge",
+    }
+    return [f"{tally[key]} {text}" for key, text in texts.items() if tally[key]]
 
 
 def _copy_image(
