@@ -916,3 +916,17 @@ class TestSameBytesEverywhere:
         order = [item.image.relative_to(src).as_posix() for item in dataset.items]
         # By path, one folder name at a time, by code point: capitals first.
         assert order == ["B.jpg", "C.jpg", "a.jpg", "sub/z.jpg", "sub-2/a.jpg"]
+
+
+def test_a_level_line_to_yolo_is_reported_as_left_out_not_as_boxed(tmp_path: Path):
+    """A line's box is what YOLO gets, and a level line's box has no height:
+    nothing is written, so the run must not say a box was."""
+    level = Shape("seam", (10, 30, 90, 30), polygon=[(10, 30), (90, 30)], kind="line")
+    dataset = one_image(tmp_path, level, LINE)
+    report = formats.write_dataset(dataset, tmp_path / "out", "yolo", ctx=Context())
+    written = (tmp_path / "out" / "labels" / "train" / "a.txt").read_text().splitlines()
+    assert len(written) == 1
+    assert report["warnings"] == [
+        "1 line(s) were written as their bounding boxes: yolo has no line shape",
+        "1 line(s) were not written: yolo has no line shape",
+    ]

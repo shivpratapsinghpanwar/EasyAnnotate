@@ -676,8 +676,15 @@ def _write_losses(dataset: Dataset, fmt: str, segmentation: bool) -> list[str]:
         for shape in annotation.shapes:
             kind = shape.shape_kind
             if kind in no_form:
-                tally[f"{kind} {no_form[kind]}"] += 1
-                if no_form[kind] == "left out":
+                outcome = no_form[kind]
+                if (fmt, kind) == ("yolo", "line") and "dropped" == yolo.fate(
+                    shape, annotation.width, annotation.height, segmentation=segmentation
+                ):
+                    # What YOLO gets of a line is its box, and the box of a
+                    # level or upright line has no area: nothing is written.
+                    outcome = "left out"
+                tally[f"{kind} {outcome}"] += 1
+                if outcome == "left out":
                     continue
             elif fmt == "yolo":
                 tally[

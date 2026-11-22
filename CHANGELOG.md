@@ -65,8 +65,8 @@ second implementation across every pair of formats.
   numbered on its own, by first appearance, so id 1 could be one class in
   `instances_train.json` and another in `instances_val.json`. Ids in a
   single-split export change too where first appearance differed from the
-  class list. Also applies to COCO output from `image.*`, `augment.*` and
-  `dataset.*` operations.
+  class list. This holds for every operation that writes COCO through the
+  dataset writer; `export.coco` is not changed.
 - **COCO `file_name` keeps the label's own name when the image file is not
   found.** It was forced to `.jpg`, so `a.png` was written as `a.jpg`.
 - **A split is a folder, never part of a file name.** Images land in
