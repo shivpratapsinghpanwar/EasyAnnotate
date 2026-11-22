@@ -173,18 +173,34 @@ class DatasetWriter:
         }
 
     def _write_coco(self) -> None:
+        # One category table for every split file: the declared classes, then
+        # any other label, sorted. A table per split gave the same id to
+        # different classes in instances_train.json and instances_val.json.
+        categories = coco_fmt.CategoryTable()
+        found = {
+            label
+            for entries in self._collected.values()
+            for annotation, _ in entries
+            for label in annotation.label_set
+        }
+        declared = list(self.classes.names)
+        for label in declared + sorted(found - set(declared)):
+            categories.id_for(label)
+
         for split, entries in sorted(self._collected.items()):
-            builder = coco_fmt.CocoBuilder(description=f"Data Factory ({split})")
+            builder = coco_fmt.CocoBuilder(
+                description=f"Data Factory ({split})", categories=categories
+            )
             for annotation, name in entries:
                 builder.add(annotation, file_name=name)
             fs.ensure_dir(self.output / "annotations", self.ctx)
             builder.write(self.output / "annotations" / f"instances_{split}.json")
-            merges = builder.categories.merges()
-            if merges:
-                self.warnings.append(
-                    "case-variant classes merged: "
-                    + "; ".join(f"{k} <- {', '.join(v)}" for k, v in merges.items())
-                )
+        merges = categories.merges()
+        if merges:
+            self.warnings.append(
+                "case-variant classes merged: "
+                + "; ".join(f"{k} <- {', '.join(v)}" for k, v in merges.items())
+            )
 
     def _write_csv(self) -> None:
         rows: list[Annotation] = []

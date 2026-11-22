@@ -74,12 +74,17 @@ class CocoBuilder:
         version: str = "1.0",
         case_policy: str = "casefold",
         label_map: dict[str, str] | None = None,
+        categories: CategoryTable | None = None,
     ) -> None:
         if case_policy not in CASE_POLICIES:
             raise ValueError(f"case_policy must be one of {CASE_POLICIES}")
         self.description = description
         self.version = version
-        self.categories = CategoryTable(case_policy=case_policy, label_map=label_map or {})
+        # A dataset written as several files (one per split) passes the same
+        # table to each builder, so an id names the same class in all of them.
+        self.categories = categories or CategoryTable(
+            case_policy=case_policy, label_map=label_map or {}
+        )
         self.images: list[dict[str, Any]] = []
         self.annotations: list[dict[str, Any]] = []
         self.background_images = 0

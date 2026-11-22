@@ -23,6 +23,18 @@ second implementation across every pair of formats.
   say) is skipped with a warning. It used to be read as an image with no
   objects and no size.
 
+### Changed output
+- **COCO category ids are the same in every split file.** They follow the
+  dataset's class list (the declared order, else the names sorted), and
+  every `instances_<split>.json` lists every class. Each split used to be
+  numbered on its own, by first appearance, so id 1 could be one class in
+  `instances_train.json` and another in `instances_val.json`. Ids in a
+  single-split export change too where first appearance differed from the
+  class list. Also applies to COCO output from `image.*`, `augment.*` and
+  `dataset.*` operations.
+- **COCO `file_name` keeps the label's own name when the image file is not
+  found.** It was forced to `.jpg`, so `a.png` was written as `a.jpg`.
+
 ## 0.4.1 — text prompts on machines without git
 
 - Text prompts work on machines without git. YOLO-World's text encoder,

@@ -19,8 +19,9 @@ import data_factory as df
 from data_factory.annotate import review
 from data_factory.core.annotations import coco as coco_fmt
 from data_factory.core.annotations import dota, formats, labelme, voc, yolo
-from data_factory.core.annotations.model import AnnotationError
+from data_factory.core.annotations.model import Annotation, AnnotationError, Shape
 from data_factory.core.types import Context
+from data_factory.core.writer import DatasetWriter
 
 W, H = IMAGE_SIZE
 BOM = b"\xef\xbb\xbf"
@@ -300,3 +301,60 @@ class TestCocoDetection:
         dataset = formats.read_dataset(tmp_path, "coco")
         assert dataset.stats()["images"] == 3
         assert any("instances_val.json" in w for w in dataset.warnings)
+
+
+# ------------------------------------------------------------- COCO writer
+
+
+def _coco_names(path: Path) -> dict[int, str]:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    return {c["id"]: c["name"] for c in document["categories"]}
+
+
+class TestCocoWriter:
+    def test_a_category_id_means_the_same_class_in_every_split_file(self, tmp_path: Path):
+        """Each split got its own numbering, by first appearance: id 1 was
+        Open in instances_train.json and Close in instances_val.json."""
+        src = tmp_path / "src"
+        make_pair(src / "train", "a", "Open", 1)
+        make_pair(src / "val", "b", "Close", 2)
+        make_pair(src / "val", "c", "Open", 3)
+        out = tmp_path / "coco"
+        formats.write_dataset(formats.read_dataset(src, "voc"), out, "coco", ctx=Context())
+
+        train = _coco_names(out / "annotations" / "instances_train.json")
+        val = _coco_names(out / "annotations" / "instances_val.json")
+        assert train == val == {1: "Close", 2: "Open"}
+
+        document = json.loads((out / "annotations" / "instances_train.json").read_text())
+        assert [train[a["category_id"]] for a in document["annotations"]] == ["Open"]
+
+    def test_category_ids_follow_a_declared_class_order(self, tmp_path: Path):
+        src = tmp_path / "src"
+        make_pair(src, "a", "Close", 1)
+        make_pair(src, "b", "Open", 2)
+        dataset = formats.read_dataset(src, "voc")
+        dataset.classes = ["Open", "Handle", "Close"]
+        out = tmp_path / "coco"
+        formats.write_dataset(dataset, out, "coco", ctx=Context())
+        names = _coco_names(out / "annotations" / "instances_train.json")
+        assert names == {1: "Open", 2: "Handle", 3: "Close"}
+
+    def test_the_streaming_writer_numbers_every_split_alike(self, tmp_path: Path):
+        writer = DatasetWriter(tmp_path / "out", "coco", Context())
+        box = (10, 10, 60, 70)
+        writer.add(Annotation("a.jpg", W, H, shapes=[Shape("Open", box)]), stem="a", split="train")
+        writer.add(Annotation("b.jpg", W, H, shapes=[Shape("Close", box)]), stem="b", split="val")
+        writer.close()
+        train = _coco_names(tmp_path / "out" / "annotations" / "instances_train.json")
+        val = _coco_names(tmp_path / "out" / "annotations" / "instances_val.json")
+        assert train == val == {1: "Close", 2: "Open"}
+
+    def test_an_image_that_is_not_on_disk_keeps_its_own_extension(self, tmp_path: Path):
+        """a.png became a.jpg in the COCO file whenever the image was missing."""
+        annotation = Annotation("a.png", W, H, shapes=[Shape("Open", (10, 10, 60, 70))])
+        dataset = formats.Dataset(items=[formats.Item(annotation=annotation)])
+        out = tmp_path / "coco"
+        formats.write_dataset(dataset, out, "coco", ctx=Context())
+        document = json.loads((out / "annotations" / "instances_train.json").read_text())
+        assert document["images"][0]["file_name"] == "a.png"

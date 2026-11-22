@@ -650,17 +650,41 @@ def _write_dota(dataset, output, ctx, report, copy_images, segmentation, on_acti
     report["classes"] = list(dataset.labels)
 
 
+def _class_order(dataset: Dataset) -> list[str]:
+    """Every class in the dataset, in the one order ids are handed out in:
+    the declared classes, then any other label found, sorted by name."""
+    order = list(dataset.labels)
+    found = {label for item in dataset.items for label in item.annotation.label_set}
+    return order + sorted(found - set(order))
+
+
 def _write_coco(dataset, output, ctx, report, copy_images, segmentation, on_action) -> None:
     by_split: dict[str, list[Item]] = {}
     for item in dataset.items:
         by_split.setdefault(item.split or "train", []).append(item)
 
+    # One table for the whole dataset, filled before any file is written. A
+    # table per split numbered classes by first appearance in that split, so
+    # id 1 could be one class in instances_train.json and another in
+    # instances_val.json -- and a model trained on one scored against the
+    # other without a single error.
+    categories = coco_fmt.CategoryTable()
+    for label in _class_order(dataset):
+        categories.id_for(label)
+
     for split, items in sorted(by_split.items()):
-        builder = coco_fmt.CocoBuilder(description=f"Data Factory export ({split})")
+        builder = coco_fmt.CocoBuilder(
+            description=f"Data Factory export ({split})", categories=categories
+        )
         image_dir = output / split
         fs.ensure_dir(image_dir, ctx)
         for item in items:
-            name = f"{item.stem}{item.image.suffix if item.image else '.jpg'}"
+            if item.image is not None:
+                name = f"{item.stem}{item.image.suffix}"
+            else:
+                # No file to ask, so the label's own name stands. Forcing
+                # ".jpg" here renamed a.png to a file that does not exist.
+                name = item.annotation.filename or f"{item.stem}.jpg"
             builder.add(item.annotation, file_name=name)
             if copy_images and item.image is not None:
                 _copy_image(item, image_dir / name, ctx, report, on_action)
@@ -668,12 +692,12 @@ def _write_coco(dataset, output, ctx, report, copy_images, segmentation, on_acti
         if not ctx.dry_run:
             fs.ensure_dir(output / "annotations", ctx)
             builder.write(output / "annotations" / f"instances_{split}.json")
-        merges = builder.categories.merges()
-        if merges:
-            report["warnings"].append(  # type: ignore[union-attr]
-                "case-variant classes merged: "
-                + "; ".join(f"{k} <- {', '.join(v)}" for k, v in merges.items())
-            )
+    merges = categories.merges()
+    if merges:
+        report["warnings"].append(  # type: ignore[union-attr]
+            "case-variant classes merged: "
+            + "; ".join(f"{k} <- {', '.join(v)}" for k, v in merges.items())
+        )
 
 
 def _write_csv(dataset, output, ctx, report, copy_images, segmentation, on_action) -> None:
