@@ -196,8 +196,14 @@ def read_dataset(
     *,
     recursive: bool = True,
     ctx: Context | None = None,
+    classes: list[str] | None = None,
 ) -> Dataset:
-    """Load a folder into the neutral model, whatever format it is in."""
+    """Load a folder into the neutral model, whatever format it is in.
+
+    ``classes`` is the caller's class names in number order. It is used for
+    one thing: naming the class numbers of a YOLO folder that has no
+    ``data.yaml`` or ``classes.txt`` of its own.
+    """
     folder = Path(folder)
     parsed: dict[Path, Any] = {}
     if fmt in ("", "auto"):
@@ -210,10 +216,11 @@ def read_dataset(
     context = ctx or Context()
     if resolved == "coco":
         dataset = _read_coco(folder, recursive, context, parsed)
+    elif resolved == "yolo":
+        dataset = _read_yolo(folder, recursive, context, classes)
     else:
         reader = {
             "voc": _read_voc,
-            "yolo": _read_yolo,
             "labelme": _read_labelme,
             "csv": _read_csv,
             "dota": _read_dota,
@@ -272,20 +279,41 @@ def _read_labelme(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     return dataset
 
 
-def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
+def _read_yolo(
+    folder: Path, recursive: bool, ctx: Context, class_names: list[str] | None = None
+) -> Dataset:
     dataset = Dataset()
     yaml_path = yolo.find_data_yaml(folder)
+    txt_path = None if yaml_path is not None else yolo.find_classes_txt(folder)
     if yaml_path is not None:
         classes, _ = yolo.read_data_yaml(yaml_path)
-        dataset.classes = list(classes.names)
-    else:
-        # Without a class list the indices are meaningless, so say so loudly
-        # and fall back to placeholder names rather than inventing a mapping.
-        classes = yolo.ClassList([])
+        named_by = yaml_path.name
+    elif txt_path is not None:
+        classes = yolo.read_classes_txt(txt_path)
+        named_by = txt_path.name
+    elif class_names:
+        # The caller knows what the numbers mean and the folder does not say:
+        # the names are taken in number order, and the run says that it did.
+        classes = yolo.ClassList(list(class_names))
+        named_by = "'classes'"
         dataset.warnings.append(
-            "no data.yaml found -- classes will be named class_0, class_1, ... "
-            "Point --classes at the right file to keep the real names."
+            "no data.yaml or classes.txt found -- class numbers were named from "
+            "'classes' in order: "
+            + ", ".join(f"{index} = {name}" for index, name in enumerate(classes.names))
         )
+    else:
+        # Without a class list the numbers are all there is, so say so loudly
+        # and name each class after its number rather than inventing a mapping.
+        classes = yolo.ClassList([])
+        named_by = ""
+        dataset.warnings.append(
+            "no data.yaml or classes.txt found -- classes are named class_0, "
+            "class_1, ... after their numbers. To give them their real names, "
+            "pass 'classes' with the names in number order (the first is class "
+            "0), or add a data.yaml or classes.txt."
+        )
+    names = list(classes.names)
+    unnamed: list[int] = []
 
     # YOLO stores coordinates normalised, so every label needs its image's
     # dimensions before it can be read at all -- one header read per image.
@@ -317,14 +345,28 @@ def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
             continue
         try:
             annotation = yolo.read(
-                label_path, classes, width, height, filename=image.name
+                label_path, classes, width, height, filename=image.name, unnamed_out=unnamed
             )
         except AnnotationError as exc:
             dataset.warnings.append(str(exc))
             continue
         dataset.items.append(Item(annotation=annotation, image=image, split=split))
-    if not dataset.classes:
-        dataset.classes = list(classes.names)
+
+    # A class number nothing names keeps its place: the list is filled up to
+    # it with class_N. Leaving the list short let the writer hand that class
+    # the next free number (5 became 2), and sorting the placeholders as text
+    # put class_10 before class_2 -- either way a YOLO folder converted to
+    # YOLO came out renumbered.
+    top = max(unnamed, default=-1)
+    if top >= len(names):
+        if named_by:
+            numbers = ", ".join(str(n) for n in sorted(set(unnamed)))
+            dataset.warnings.append(
+                f"{len(unnamed)} object(s) use class number(s) {named_by} does not "
+                f"name ({numbers}); they are named class_N and keep their numbers"
+            )
+        names.extend(f"class_{index}" for index in range(len(names), top + 1))
+    dataset.classes = names
     return dataset
 
 

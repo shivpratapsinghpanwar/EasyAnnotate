@@ -81,8 +81,14 @@ def read(
     height: int,
     *,
     filename: str | None = None,
+    unnamed_out: list[int] | None = None,
 ) -> Annotation:
-    """Parse one ``.txt`` into an :class:`Annotation` in absolute pixels."""
+    """Parse one ``.txt`` into an :class:`Annotation` in absolute pixels.
+
+    ``unnamed_out`` receives the class number of every object whose number
+    the class list has no name for, so a caller can keep those numbers in
+    place and say how many objects were affected.
+    """
     shapes: list[Shape] = []
     text = read_label_text(path)
 
@@ -98,6 +104,8 @@ def read(
             raise AnnotationError(f"{path.name}:{number}: malformed line {line!r}") from exc
 
         label = classes.name_for(class_id)
+        if unnamed_out is not None and not 0 <= class_id < len(classes):
+            unnamed_out.append(class_id)
         if len(values) == 4:
             shapes.append(_box_shape(label, values, width, height))
         elif len(values) == 5:
@@ -275,6 +283,31 @@ def find_data_yaml(folder: Path) -> Path | None:
             if path.is_file():
                 return path
     return None
+
+
+#: The other common place for YOLO class names: one name per line, the line
+#: number being the class number. LabelImg and Label Studio both write it.
+CLASSES_TXT = "classes.txt"
+
+
+def find_classes_txt(folder: Path) -> Path | None:
+    """Locate a ``classes.txt``: in the folder, in its ``labels/``, or failing
+    that the first one anywhere beneath it (ordered by path, so the choice
+    does not depend on the machine)."""
+    for candidate in (folder / CLASSES_TXT, folder / LABEL_DIR / CLASSES_TXT):
+        if candidate.is_file():
+            return candidate
+    found = [p for p in folder.rglob(CLASSES_TXT) if p.is_file()]
+    return min(found, key=lambda p: p.relative_to(folder).parts) if found else None
+
+
+def read_classes_txt(path: Path) -> ClassList:
+    """Read a ``classes.txt``. A blank line in the middle still holds its
+    number, under a placeholder name, so the names after it do not shift."""
+    lines = [line.strip() for line in read_label_text(path).splitlines()]
+    while lines and not lines[-1]:
+        lines.pop()
+    return ClassList([name or f"class_{index}" for index, name in enumerate(lines)])
 
 
 def label_path_for(image: Path, root: Path) -> Path:

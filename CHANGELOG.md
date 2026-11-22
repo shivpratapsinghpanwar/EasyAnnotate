@@ -25,6 +25,15 @@ second implementation across every pair of formats.
 - An image with no label file keeps the split its folder names. Unlabelled
   images under `val/` were written to `train/` (YOLO, DOTA, COCO) or to the
   top of the output (VOC, LabelMe).
+- `--classes` names the class numbers of YOLO labels that have no names
+  file: `--classes dog cat` makes class 0 `dog` and class 1 `cat`, and the
+  warning says exactly that. It used to produce `dog, cat, class_0, class_1`
+  and write class 0 out as class 2, under a warning ("Point --classes at
+  the right file") that described something `--classes` never did.
+- `classes.txt` (one name per line, as LabelImg and Label Studio write it)
+  is read when there is no `data.yaml`.
+- When `--classes` reorders a YOLO dataset that has its own names file, the
+  run says which class moved from which number to which.
 
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the
@@ -42,6 +51,13 @@ second implementation across every pair of formats.
   is on their path inside the dataset. `photo_test.xml` used to be put in
   `test/` and `train.xml` in `train/`. COCO's `instances_<split>.json` is
   still read as naming its split.
+- **A YOLO folder with no names file keeps its class numbers.** The classes
+  are `class_0 ... class_N` for every number up to the highest in use, so
+  number 12 stays 12. They used to be sorted as text (`class_10` before
+  `class_2`) and packed together, which renumbered a YOLO to YOLO
+  conversion with 11 or more classes, or with unused numbers. The same
+  holds for numbers beyond the end of a `data.yaml`: they keep their place
+  and the run reports them.
 
 ## 0.4.1 — text prompts on machines without git
 

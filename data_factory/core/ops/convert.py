@@ -32,7 +32,8 @@ CONVERT_PARAMS = (
     Param(
         "classes",
         "strs",
-        "Explicit class order, e.g. 'Closed,Open'. Fixes YOLO indices in place.",
+        "Class names in number order, e.g. 'Closed,Open' (Closed is class 0). Sets "
+        "the output order; names the numbers of YOLO labels that have no names file.",
         default=None,
     ),
     Param("recursive", "bool", "Include sub-folders.", default=True),
@@ -58,8 +59,10 @@ CONVERT_PARAMS = (
         "direction works: voc->yolo, coco->voc, labelme->coco, and so on.\n"
         "\n"
         "Things worth knowing before you run it:\n"
-        "  * YOLO stores a class *index*, so the class list lives in data.yaml.\n"
-        "    Reading a YOLO folder without one names classes class_0, class_1...\n"
+        "  * YOLO stores a class *number*, so the names live in data.yaml or\n"
+        "    classes.txt. Reading a YOLO folder with neither names the classes\n"
+        "    class_0, class_1... -- unless you pass 'classes', which then names\n"
+        "    the numbers in order (the first name is class 0). No number moves.\n"
         "  * COCO RLE / iscrowd masks cannot become polygons without a mask\n"
         "    decoder; those objects keep their boxes and the run warns.\n"
         "  * CSV cannot hold outlines, so converting a segmentation dataset to\n"
@@ -72,7 +75,10 @@ CONVERT_PARAMS = (
         "add a class next month and every index at or after it shifts, so the\n"
         ".txt files you exported earlier quietly start meaning something else.\n"
         "Pass the same 'classes' list on every export and the indices hold. Any\n"
-        "class found but not listed is appended at the end, never inserted."
+        "class found but not listed is appended at the end, never inserted.\n"
+        "When the source is YOLO with its own names file, 'classes' is still the\n"
+        "output order: a different order renumbers the labels, and the run says\n"
+        "which class moved from which number to which."
     ),
 )
 def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
@@ -81,9 +87,16 @@ def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
     output: Path = params["output"]
     target: str = params["to"]
 
+    declared: list[str] | None = params.get("classes")
+    order = [name.strip() for name in declared or [] if name.strip()]
+
     try:
         dataset = formats.read_dataset(
-            folder, params["source_format"], recursive=params["recursive"], ctx=ctx
+            folder,
+            params["source_format"],
+            recursive=params["recursive"],
+            ctx=ctx,
+            classes=order or None,
         )
     except AnnotationError as exc:
         result.fail(str(exc))
@@ -101,11 +114,32 @@ def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
     # An explicit class order pins the YOLO indices. Applied after reading so
     # it overrides a data.yaml too: the caller's declared order wins over
     # whatever the source folder happened to carry.
-    declared: list[str] | None = params.get("classes")
-    if declared:
-        order = [name.strip() for name in declared if name.strip()]
+    if order:
         found = {label for item in dataset.items for label in item.annotation.label_set}
-        unlisted = sorted(found - set(order))
+        # What the source itself says the order is: a YOLO names file, the
+        # names just given to a YOLO folder without one, COCO's categories.
+        known = list(dataset.classes)
+        if known[: len(order)] == order:
+            # 'classes' agrees with the numbering the source already has, so
+            # nothing moves -- including the classes after the ones listed.
+            unlisted = sorted(found - set(known))
+            final = known + unlisted
+        else:
+            listed = set(order)
+            unlisted = [name for name in known if name in found and name not in listed]
+            unlisted += sorted(found - listed - set(known))
+            final = order + unlisted
+            moved = [
+                f"{name} {known.index(name)} -> {final.index(name)}"
+                for name in known
+                if name in final and known.index(name) != final.index(name)
+            ]
+            if moved and dataset.source_format == "yolo":
+                shown = ", ".join(moved[:10]) + (f" and {len(moved) - 10} more" if len(moved) > 10 else "")
+                result.warnings.append(
+                    f"'classes' reorders the classes this YOLO dataset already "
+                    f"numbers: {shown}. The labels are renumbered to match."
+                )
         if unlisted:
             result.warnings.append(
                 f"{len(unlisted)} class(es) present but not in 'classes' were appended "
@@ -119,7 +153,7 @@ def convert_dataset(params: dict[str, Any], ctx: Context) -> OpResult:
                 f"{len(unused)} declared class(es) have no objects here but keep "
                 f"their index: {', '.join(unused)}"
             )
-        dataset.classes = order + unlisted
+        dataset.classes = final
 
     stats = dataset.stats()
     total = len(dataset.items)

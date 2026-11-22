@@ -409,3 +409,116 @@ class TestSplits:
                 labelme.write(annotation, src / "val" / "a.json")
         dataset = formats.read_dataset(src, fmt)
         assert {item.stem: item.split for item in dataset.items} == {"a": "val", "bare": "val"}
+
+
+# ------------------------------------------------------- YOLO class numbers
+
+
+def yolo_folder(root: Path, numbers: list[int], *, names: list[str] | None = None) -> Path:
+    """Flat YOLO labels, one box per class number, with or without data.yaml."""
+    for position, number in enumerate(numbers):
+        make_image(root / f"img{position:02d}.jpg", position)
+        (root / f"img{position:02d}.txt").write_text(
+            f"{number} 0.500000 0.500000 0.200000 0.200000\n", encoding="utf-8"
+        )
+    if names is not None:
+        yolo.write_data_yaml(root / "data.yaml", yolo.ClassList(names))
+    return root
+
+
+def class_column(root: Path) -> list[int]:
+    labels = sorted(p for p in root.rglob("*.txt") if p.name != "classes.txt")
+    return [int(line.split()[0]) for p in labels for line in p.read_text().splitlines()]
+
+
+class TestYoloClassNumbers:
+    """A YOLO label is a class *number*. Whatever else a conversion does, a
+    YOLO folder converted to YOLO must come out with the numbers it went in
+    with -- anything else relabels the dataset without an error."""
+
+    @pytest.mark.parametrize(
+        "numbers", [list(range(12)), [0, 3, 12], [2, 10]], ids=["twelve", "gaps", "no-zero"]
+    )
+    def test_numbers_survive_when_there_is_no_names_file(self, tmp_path: Path, numbers):
+        src = yolo_folder(tmp_path / "src", numbers)
+        out = tmp_path / "out"
+        result = run("convert.dataset", {"folder": str(src), "output": str(out), "to": "yolo"})
+        assert result.ok
+        assert class_column(out / "labels") == numbers
+        names, _ = yolo.read_data_yaml(out / "data.yaml")
+        assert names.names == [f"class_{i}" for i in range(max(numbers) + 1)]
+
+    def test_numbers_beyond_the_names_file_survive_and_are_reported(self, tmp_path: Path):
+        src = yolo_folder(tmp_path / "src", [0, 1, 5], names=["cat", "dog"])
+        out = tmp_path / "out"
+        result = run("convert.dataset", {"folder": str(src), "output": str(out), "to": "yolo"})
+        assert class_column(out / "labels") == [0, 1, 5]
+        names, _ = yolo.read_data_yaml(out / "data.yaml")
+        assert names.names == ["cat", "dog", "class_2", "class_3", "class_4", "class_5"]
+        assert any("data.yaml does not name" in w and "5" in w for w in result.warnings)
+
+    def test_classes_names_the_numbers_when_there_is_no_names_file(self, tmp_path: Path):
+        """`--classes dog cat` gave dog, cat, class_0, class_1 -- and class 0
+        was written out as class 2."""
+        src = yolo_folder(tmp_path / "src", [0, 1, 0])
+        out = tmp_path / "out"
+        result = run(
+            "convert.dataset",
+            {"folder": str(src), "output": str(out), "to": "yolo", "classes": ["dog", "cat"]},
+        )
+        assert result.data["classes"] == ["dog", "cat"]
+        assert class_column(out / "labels") == [0, 1, 0]
+        assert any("0 = dog, 1 = cat" in w for w in result.warnings)
+        assert not any("Point --classes" in w for w in result.warnings)
+
+        back = formats.read_dataset(out, "yolo")
+        assert [i.annotation.shapes[0].label for i in back.items] == ["dog", "cat", "dog"]
+
+    def test_classes_shorter_than_the_numbers_in_use_moves_nothing(self, tmp_path: Path):
+        src = yolo_folder(tmp_path / "src", [0, 3])
+        out = tmp_path / "out"
+        result = run(
+            "convert.dataset",
+            {"folder": str(src), "output": str(out), "to": "yolo", "classes": ["dog", "cat"]},
+        )
+        assert result.data["classes"] == ["dog", "cat", "class_2", "class_3"]
+        assert class_column(out / "labels") == [0, 3]
+        assert any("'classes' does not name" in w and "3" in w for w in result.warnings)
+
+    def test_without_names_the_warning_says_how_to_give_them(self, tmp_path: Path):
+        src = yolo_folder(tmp_path / "src", [0])
+        warning = next(w for w in formats.read_dataset(src, "yolo").warnings if "no data.yaml" in w)
+        assert "number order" in warning and "classes.txt" in warning
+
+    @pytest.mark.parametrize("where", [".", "labels"])
+    def test_classes_txt_is_read(self, tmp_path: Path, where: str):
+        src = tmp_path / "src"
+        make_image(src / "images" / "a.jpg", 1)
+        (src / "labels").mkdir()
+        (src / "labels" / "a.txt").write_text("1 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+        (src / where / "classes.txt").write_text("cat\ndog\n", encoding="utf-8")
+        dataset = formats.read_dataset(src, "auto")
+        assert dataset.source_format == "yolo"
+        assert dataset.classes == ["cat", "dog"]
+        assert dataset.items[0].annotation.shapes[0].label == "dog"
+        assert not any("no data.yaml" in w for w in dataset.warnings)
+
+    def test_classes_reordering_known_names_says_so(self, tmp_path: Path):
+        src = yolo_folder(tmp_path / "src", [0, 1], names=["cat", "dog"])
+        out = tmp_path / "out"
+        result = run(
+            "convert.dataset",
+            {"folder": str(src), "output": str(out), "to": "yolo", "classes": ["dog", "cat"]},
+        )
+        assert result.data["classes"] == ["dog", "cat"]
+        assert class_column(out / "labels") == [1, 0]  # the same objects, renumbered on request
+        assert any("cat 0 -> 1" in w and "dog 1 -> 0" in w for w in result.warnings)
+
+    def test_classes_in_the_order_the_source_already_uses_is_silent(self, tmp_path: Path):
+        src = yolo_folder(tmp_path / "src", [0, 1], names=["cat", "dog"])
+        result = run(
+            "convert.dataset",
+            {"folder": str(src), "output": str(tmp_path / "out"), "to": "yolo",
+             "classes": ["cat", "dog"]},
+        )
+        assert result.warnings == []
