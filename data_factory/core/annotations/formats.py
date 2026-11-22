@@ -235,7 +235,11 @@ def _read_sidecars(
                 # An unlabelled image is a real dataset member; carry it as a
                 # background rather than dropping it on the floor.
                 dataset.items.append(
-                    Item(annotation=_empty_annotation(pair.image), image=pair.image)
+                    Item(
+                        annotation=_empty_annotation(pair.image),
+                        image=pair.image,
+                        split=_split_of(pair.key),
+                    )
                 )
             continue
         try:
@@ -304,10 +308,11 @@ def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         width, height = sizes.get(image, (0, 0))
         if width <= 0:
             continue
+        split = _split_of(fs.relative_to_safe(image, folder).as_posix())
         if not label_path.is_file():
             dataset.items.append(
                 Item(annotation=Annotation(filename=image.name, width=width, height=height),
-                     image=image)
+                     image=image, split=split)
             )
             continue
         try:
@@ -317,13 +322,7 @@ def _read_yolo(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         except AnnotationError as exc:
             dataset.warnings.append(str(exc))
             continue
-        dataset.items.append(
-            Item(
-                annotation=annotation,
-                image=image,
-                split=_split_of(str(fs.relative_to_safe(image, folder)).replace("\\", "/")),
-            )
-        )
+        dataset.items.append(Item(annotation=annotation, image=image, split=split))
     if not dataset.classes:
         dataset.classes = list(classes.names)
     return dataset
@@ -350,10 +349,11 @@ def _read_dota(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         width, height = sizes.get(image, (0, 0))
         if width <= 0:
             continue
+        split = _split_of(fs.relative_to_safe(image, folder).as_posix())
         if not label_path.is_file():
             dataset.items.append(
                 Item(annotation=Annotation(filename=image.name, width=width, height=height),
-                     image=image)
+                     image=image, split=split)
             )
             continue
         try:
@@ -361,13 +361,7 @@ def _read_dota(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         except AnnotationError as exc:
             dataset.warnings.append(str(exc))
             continue
-        dataset.items.append(
-            Item(
-                annotation=annotation,
-                image=image,
-                split=_split_of(str(fs.relative_to_safe(image, folder)).replace("\\", "/")),
-            )
-        )
+        dataset.items.append(Item(annotation=annotation, image=image, split=split))
     return dataset
 
 
@@ -407,7 +401,7 @@ def _read_coco(
         read += 1
         if images_by_name is None:
             images_by_name = _image_index(folder)
-        split = _split_of(path.stem)
+        split = _coco_split(path.stem)
         try:
             annotations = coco_fmt.to_annotations(document, unsupported_out=unsupported)
             names = [
@@ -514,11 +508,30 @@ def _image_size(path: Path) -> tuple[int, int]:
     return image_size(path)
 
 
-def _split_of(key: str) -> str:
-    """Recover train/val/test from a path or filename, when it is there."""
-    lowered = key.lower().replace("\\", "/")
-    for name in ("train", "valid", "val", "test"):
-        if f"/{name}/" in f"/{lowered}/" or lowered.endswith(f"_{name}"):
+_SPLIT_NAMES = ("train", "valid", "val", "test")
+
+
+def _split_of(relative: str) -> str:
+    """The split a file belongs to: a folder named train, val, valid or test
+    on its path inside the dataset.
+
+    ``relative`` is the file's path under the dataset folder; its last
+    component is the file itself and is never looked at. Matching the name
+    too sent ``photo_test.xml`` to test/ and ``train.xml`` to train/.
+    """
+    folders = relative.lower().replace("\\", "/").split("/")[:-1]
+    for name in _SPLIT_NAMES:
+        if name in folders:
+            return "val" if name == "valid" else name
+    return ""
+
+
+def _coco_split(stem: str) -> str:
+    """The split a COCO annotation file is for. COCO is the one layout that
+    names the split in a file name: ``instances_val.json``."""
+    lowered = stem.lower()
+    for name in _SPLIT_NAMES:
+        if lowered.endswith(f"_{name}"):
             return "val" if name == "valid" else name
     return ""
 

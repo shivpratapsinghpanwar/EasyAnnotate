@@ -358,3 +358,54 @@ class TestCocoWriter:
         formats.write_dataset(dataset, out, "coco", ctx=Context())
         document = json.loads((out / "annotations" / "instances_train.json").read_text())
         assert document["images"][0]["file_name"] == "a.png"
+
+
+# ------------------------------------------------------------------ splits
+
+
+class TestSplits:
+    def test_a_file_name_is_never_a_split(self, tmp_path: Path):
+        """photo_test.xml went to test/ and train.xml to train/."""
+        src = tmp_path / "src"
+        for stem in ("photo_test", "train", "val", "shot_valid"):
+            make_pair(src, stem, "Open", 1)
+        dataset = formats.read_dataset(src, "voc")
+        assert {item.stem: item.split for item in dataset.items} == {
+            "photo_test": "", "train": "", "val": "", "shot_valid": "",
+        }
+        out = tmp_path / "out"
+        formats.write_dataset(dataset, out, "voc", ctx=Context())
+        assert sorted(p.name for p in out.iterdir() if p.is_dir()) == []
+
+    def test_a_folder_named_for_a_split_still_is_one(self, tmp_path: Path):
+        src = tmp_path / "src"
+        make_pair(src / "train", "photo_test", "Open", 1)
+        make_pair(src / "Valid", "a", "Open", 2)
+        dataset = formats.read_dataset(src, "voc")
+        assert {item.stem: item.split for item in dataset.items} == {
+            "photo_test": "train", "a": "val",
+        }
+
+    @pytest.mark.parametrize("fmt", ["voc", "labelme", "yolo", "dota"])
+    def test_an_unlabelled_image_keeps_its_split(self, tmp_path: Path, fmt: str):
+        src = tmp_path / "src"
+        annotation = Annotation("a.jpg", W, H, shapes=[Shape("Open", (10, 10, 60, 70))])
+        if fmt in ("yolo", "dota"):
+            make_image(src / "images" / "val" / "a.jpg", 1)
+            make_image(src / "images" / "val" / "bare.jpg", 2)
+            label = src / "labels" / "val" / "a.txt"
+            label.parent.mkdir(parents=True)
+            if fmt == "yolo":
+                yolo.write(annotation, label, yolo.ClassList(["Open"]))
+                yolo.write_data_yaml(src / "data.yaml", yolo.ClassList(["Open"]))
+            else:
+                dota.write(annotation, label)
+        else:
+            make_image(src / "val" / "a.jpg", 1)
+            make_image(src / "val" / "bare.jpg", 2)
+            if fmt == "voc":
+                voc.write(annotation, src / "val" / "a.xml")
+            else:
+                labelme.write(annotation, src / "val" / "a.json")
+        dataset = formats.read_dataset(src, fmt)
+        assert {item.stem: item.split for item in dataset.items} == {"a": "val", "bare": "val"}

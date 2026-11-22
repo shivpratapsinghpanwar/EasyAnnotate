@@ -22,6 +22,9 @@ second implementation across every pair of formats.
 - A `.json` in a LabelMe folder that has no `shapes` list (a settings file,
   say) is skipped with a warning. It used to be read as an image with no
   objects and no size.
+- An image with no label file keeps the split its folder names. Unlabelled
+  images under `val/` were written to `train/` (YOLO, DOTA, COCO) or to the
+  top of the output (VOC, LabelMe).
 
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the
@@ -34,6 +37,11 @@ second implementation across every pair of formats.
   `dataset.*` operations.
 - **COCO `file_name` keeps the label's own name when the image file is not
   found.** It was forced to `.jpg`, so `a.png` was written as `a.jpg`.
+- **A split is a folder, never part of a file name.** Images land in
+  `train/`, `val/` or `test/` only when a folder of that name (or `valid`)
+  is on their path inside the dataset. `photo_test.xml` used to be put in
+  `test/` and `train.xml` in `train/`. COCO's `instances_<split>.json` is
+  still read as naming its split.
 
 ## 0.4.1 — text prompts on machines without git
 
