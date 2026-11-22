@@ -34,7 +34,7 @@ PARAMS = (
     Param("include_backgrounds", "bool",
           "Include object-free images as hard negatives.", default=True),
     Param("description", "str", "Description written into the COCO info block.",
-          default="Data Factory export"),
+          default="EasyAnnotate export"),
     Param("recursive", "bool", "Scan sub-folders when not using splits.", default=False),
     Param("label_ext", "str", "Sidecar label extension.", default=".xml"),
 )

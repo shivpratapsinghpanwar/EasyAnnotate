@@ -3,6 +3,7 @@
 ## Unreleased
 
 - An armed Assist helper takes the drag over any drawing tool; over Box it silently drew a plain box.
+- The HTML report and COCO exports sign themselves EasyAnnotate (the report with its version), not "Data Factory".
 
 ## 0.4.1 — text prompts on machines without git
 

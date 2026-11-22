@@ -174,7 +174,7 @@ class DatasetWriter:
 
     def _write_coco(self) -> None:
         for split, entries in sorted(self._collected.items()):
-            builder = coco_fmt.CocoBuilder(description=f"Data Factory ({split})")
+            builder = coco_fmt.CocoBuilder(description=f"EasyAnnotate ({split})")
             for annotation, name in entries:
                 builder.add(annotation, file_name=name)
             fs.ensure_dir(self.output / "annotations", self.ctx)
