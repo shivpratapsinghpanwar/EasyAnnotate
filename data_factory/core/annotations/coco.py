@@ -152,9 +152,45 @@ class CocoBuilder:
         }
 
 
-def load(path: Path) -> dict[str, Any]:
-    """Read an existing instances.json."""
-    return json.loads(Path(path).read_text(encoding="utf-8"))
+def load(path: Path) -> Any:
+    """Read an existing instances.json.
+
+    A file that is not JSON raises :class:`AnnotationError` naming it, like
+    every other reader here -- a truncated download is a normal thing to be
+    handed, and a ``JSONDecodeError`` traceback tells nobody which file.
+    """
+    path = Path(path)
+    try:
+        # utf-8-sig: a byte order mark at the start is not part of the JSON.
+        return json.loads(path.read_text(encoding="utf-8-sig"))
+    except OSError as exc:
+        raise AnnotationError(f"{path.name}: cannot read ({exc})") from exc
+    except ValueError as exc:
+        raise AnnotationError(f"{path.name}: cannot parse ({exc})") from exc
+
+
+def _entries(coco: dict[str, Any], key: str) -> list[Any]:
+    """One of the document's three lists; absent is empty, anything else is
+    not a COCO document."""
+    value = coco.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        raise AnnotationError(f"'{key}' must be a list, got {type(value).__name__}")
+    return value
+
+
+def _dimension(value: Any) -> int:
+    """An image width or height, or 0 when the entry holds no usable one."""
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
+
+
+def _usable_id(entry: Any) -> bool:
+    """Whether an image or category entry can be referred to at all."""
+    return isinstance(entry, dict) and isinstance(entry.get("id"), (int, float, str))
 
 
 def _score(ann: dict[str, Any]) -> float | None:
@@ -272,26 +308,36 @@ def to_annotations(
             f"a COCO document must be an object, got {type(coco).__name__}"
         )
 
-    names = {c["id"]: str(c.get("name", f"class_{c['id']}")) for c in coco.get("categories", [])}
-    by_image: dict[int, Annotation] = {}
+    names = {
+        c["id"]: str(c.get("name", f"class_{c['id']}"))
+        for c in _entries(coco, "categories")
+        if _usable_id(c)
+    }
+    by_image: dict[Any, Annotation] = {}
 
-    for image in coco.get("images", []):
+    for image in _entries(coco, "images"):
+        if not _usable_id(image):
+            continue
         by_image[image["id"]] = Annotation(
             filename=Path(str(image.get("file_name", ""))).name,
-            width=int(image.get("width") or 0),
-            height=int(image.get("height") or 0),
+            width=_dimension(image.get("width")),
+            height=_dimension(image.get("height")),
             shapes=[],
         )
 
     rle_count = 0
-    for ann in coco.get("annotations", []):
-        annotation = by_image.get(ann.get("image_id"))
+    for ann in _entries(coco, "annotations"):
+        if not isinstance(ann, dict):
+            continue
+        image_id = ann.get("image_id")
+        annotation = by_image.get(image_id) if isinstance(image_id, (int, float, str)) else None
         if annotation is None:
             continue
         bbox = ann.get("bbox") or [0, 0, 0, 0]
         try:
             x, y, w, h = (float(v) for v in bbox[:4])
-        except (TypeError, ValueError):
+            box = (int(round(x)), int(round(y)), int(round(x + w)), int(round(y + h)))
+        except (TypeError, ValueError, OverflowError):
             continue
 
         segmentation = ann.get("segmentation")
@@ -301,15 +347,13 @@ def to_annotations(
         elif isinstance(segmentation, list) and segmentation:
             polygon = _first_polygon(segmentation)
 
+        category = ann.get("category_id")
         annotation.shapes.append(
             Shape(
-                label=names.get(ann.get("category_id"), f"class_{ann.get('category_id')}"),
-                bbox=(
-                    int(round(x)),
-                    int(round(y)),
-                    int(round(x + w)),
-                    int(round(y + h)),
-                ),
+                label=names.get(category, f"class_{category}")
+                if isinstance(category, (int, float, str))
+                else f"class_{category}",
+                bbox=box,
                 polygon=polygon,
                 # 'score' is what every detector writes and no ground-truth
                 # file has. Carrying it is what lets the review layer tell a
@@ -339,7 +383,10 @@ def _first_polygon(segmentation: list[Any]) -> list[Point] | None:
     downstream can represent anyway."""
     for part in segmentation:
         if isinstance(part, list) and len(part) >= 6:
-            values = [float(v) for v in part]
+            try:
+                values = [float(v) for v in part]
+            except (TypeError, ValueError):
+                continue
             return [
                 (int(round(values[i])), int(round(values[i + 1])))
                 for i in range(0, len(values) - 1, 2)

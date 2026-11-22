@@ -19,16 +19,14 @@ from pathlib import Path
 
 from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
+from .yolo import read_label_text
 
 HEADER_PREFIXES = ("imagesource:", "gsd:")
 
 
 def read(path: Path, width: int, height: int, *, filename: str | None = None) -> Annotation:
     shapes: list[Shape] = []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise AnnotationError(f"{path.name}: cannot read ({exc})") from exc
+    text = read_label_text(path)
 
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()

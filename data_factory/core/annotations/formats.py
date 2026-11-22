@@ -129,7 +129,7 @@ def _looks_like_dota(folder: Path) -> bool:
         if not path.is_file() or path.name == "classes.txt":
             continue
         try:
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            lines = path.read_text(encoding="utf-8-sig", errors="replace").splitlines()
         except OSError:
             continue
         for line in lines:
@@ -353,11 +353,26 @@ def _read_coco(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     for path in files:
         document = coco_fmt.load(path)
         split = _split_of(path.stem)
-        for annotation in coco_fmt.to_annotations(document, unsupported_out=unsupported):
+        try:
+            annotations = coco_fmt.to_annotations(document, unsupported_out=unsupported)
+            names = [
+                str(category.get("name") or "")
+                for category in document.get("categories") or []
+                if isinstance(category, dict)
+            ]
+        except AnnotationError as exc:
+            raise AnnotationError(f"{path.name}: {exc}") from exc
+        except (AttributeError, KeyError, TypeError, ValueError) as exc:
+            # Valid JSON in a shape nobody anticipated. The specific cases are
+            # handled where they arise; this is what keeps the rest from
+            # reaching the user as a traceback with no file name in it.
+            raise AnnotationError(
+                f"{path.name}: not a readable COCO document ({type(exc).__name__}: {exc})"
+            ) from exc
+        for annotation in annotations:
             image = _pick_image(images_by_name, annotation.filename, split)
             dataset.items.append(Item(annotation=annotation, image=image, split=split))
-        for category in document.get("categories", []):
-            name = str(category.get("name", ""))
+        for name in names:
             if name and name not in dataset.classes:
                 dataset.classes.append(name)
     dataset.warnings.extend(unsupported)

@@ -90,7 +90,7 @@ def read_predictions(
         if not candidate.is_file():
             continue
         try:
-            document = json.loads(candidate.read_text(encoding="utf-8"))
+            document = json.loads(candidate.read_text(encoding="utf-8-sig"))
         except (OSError, ValueError):
             continue
         if coco_fmt.is_detection_results(document):
@@ -203,7 +203,7 @@ def _read_json(
     path: Path, project_classes: list[str] | None, notes: list[str]
 ) -> tuple[list[Annotation], list[str]]:
     try:
-        document = json.loads(path.read_text(encoding="utf-8"))
+        document = json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, ValueError) as exc:
         raise ReviewError(f"{path.name}: not readable JSON ({exc})") from exc
 

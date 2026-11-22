@@ -1,5 +1,22 @@
 # Changelog
 
+## Unreleased
+
+Converter fixes, found by comparing this tool's output byte for byte with a
+second implementation across every pair of formats.
+
+### Fixed
+- A byte order mark at the start of a file is accepted by every reader:
+  YOLO and DOTA `.txt`, LabelMe and COCO `.json`, VOC `.xml`, `data.yaml`.
+  YOLO and DOTA files that began with one were skipped as malformed, LabelMe
+  files failed to parse, and a COCO file ended the run with a traceback.
+- A COCO file that is not valid JSON, or is JSON of the wrong shape, fails
+  with one line naming the file. A label file that is not UTF-8 is skipped
+  with a warning naming it.
+- A `.json` in a LabelMe folder that has no `shapes` list (a settings file,
+  say) is skipped with a warning. It used to be read as an image with no
+  objects and no size.
+
 ## 0.4.1 — text prompts on machines without git
 
 - Text prompts work on machines without git. YOLO-World's text encoder,

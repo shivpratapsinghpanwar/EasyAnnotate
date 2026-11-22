@@ -59,6 +59,21 @@ class ClassList:
         return len(self.names)
 
 
+def read_label_text(path: Path) -> str:
+    """The text of a label file, without the byte order mark some editors add.
+
+    Notepad and PowerShell both put one at the start of a UTF-8 file. Left in,
+    it glues itself to the first number on the first line, and the whole file
+    is thrown away as malformed over three bytes nobody can see.
+    """
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise AnnotationError(f"{path.name}: cannot read ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise AnnotationError(f"{path.name}: not UTF-8 text ({exc})") from exc
+
+
 def read(
     path: Path,
     classes: ClassList,
@@ -69,10 +84,7 @@ def read(
 ) -> Annotation:
     """Parse one ``.txt`` into an :class:`Annotation` in absolute pixels."""
     shapes: list[Shape] = []
-    try:
-        text = path.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise AnnotationError(f"{path.name}: cannot read ({exc})") from exc
+    text = read_label_text(path)
 
     for number, line in enumerate(text.splitlines(), start=1):
         line = line.strip()
@@ -238,7 +250,7 @@ def read_data_yaml(path: Path) -> tuple[ClassList, dict[str, str]]:
     import yaml
 
     try:
-        document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+        document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
     except Exception as exc:
         raise AnnotationError(f"{path.name}: cannot parse ({exc})") from exc
 

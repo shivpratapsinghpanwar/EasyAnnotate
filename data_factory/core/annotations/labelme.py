@@ -34,12 +34,22 @@ def read(
     and deliberately has nowhere to stash out-of-band notes.
     """
     try:
-        document: dict[str, Any] = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
+        # utf-8-sig: a byte order mark at the start is not part of the JSON.
+        document: Any = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, ValueError) as exc:
         raise AnnotationError(f"{path.name}: cannot parse ({exc})") from exc
 
-    width = int(document.get("imageWidth") or 0)
-    height = int(document.get("imageHeight") or 0)
+    # Every LabelMe file has a "shapes" list, even an empty one. A JSON file
+    # without it is some other file that happens to sit in the folder -- a
+    # settings file, a COCO document -- and reading it as an image with no
+    # objects would add a made-up background to the dataset.
+    if not isinstance(document, dict) or not isinstance(document.get("shapes"), list):
+        raise AnnotationError(
+            f"{path.name}: not a LabelMe file (expected a JSON object with a 'shapes' list)"
+        )
+
+    width = _dimension(document.get("imageWidth"))
+    height = _dimension(document.get("imageHeight"))
     filename = str(document.get("imagePath") or path.with_suffix(".jpg").name)
     # imagePath is often a relative path like "../images/x.jpg"; we only ever
     # want the basename, since pairing is by stem.
@@ -47,7 +57,9 @@ def read(
 
     shapes: list[Shape] = []
     skipped: list[str] = []
-    for raw in document.get("shapes", []):
+    for raw in document["shapes"]:
+        if not isinstance(raw, dict):
+            continue
         shape = _read_shape(raw, path, skipped)
         if shape is not None:
             shapes.append(shape)
@@ -71,6 +83,15 @@ def read(
         shapes=shapes,
         source_path=path,
     )
+
+
+def _dimension(value: Any) -> int:
+    """An image width or height, or 0 when the file does not hold a usable one
+    (the caller then measures the image itself)."""
+    try:
+        return max(0, int(float(value or 0)))
+    except (TypeError, ValueError, OverflowError):
+        return 0
 
 
 def _read_shape(raw: dict[str, Any], path: Path, skipped: list[str]) -> Shape | None:
