@@ -522,3 +522,54 @@ class TestYoloClassNumbers:
              "classes": ["cat", "dog"]},
         )
         assert result.warnings == []
+
+
+# ------------------------------------------------------- data.yaml class names
+
+AWKWARD_NAMES = [
+    "no", "yes", "010", "1.50", "~", "0x1F", "on", "null", "True", "1e3", "y", "12",
+    "a: b", "#hash", '"quoted', "'single'", " padded ", "a #b", "- dash", "[x]", "{x}",
+    "*star", "&amp", "!bang", "%pct", "@at", "`tick", "|", ">", "?", "tail:", "",
+    "two\nlines", "tab\there", "caf\u00e9", "\u732b", "plain", "traffic light", "10mm_bolt",
+]
+
+
+class TestDataYamlNames:
+    def test_names_are_read_as_text_whatever_yaml_would_make_of_them(self, tmp_path: Path):
+        """no became False, 010 became 8, 1.50 became 1.5, ~ became None."""
+        path = tmp_path / "data.yaml"
+        path.write_text(
+            "names:\n  0: no\n  1: yes\n  2: 010\n  3: 1.50\n  4: ~\n  5: 0x1F\n", encoding="utf-8"
+        )
+        classes, _ = yolo.read_data_yaml(path)
+        assert classes.names == ["no", "yes", "010", "1.50", "~", "0x1F"]
+
+        path.write_text("names: [no, 010, 1.50]\n", encoding="utf-8")
+        assert yolo.read_data_yaml(path)[0].names == ["no", "010", "1.50"]
+
+    def test_every_name_survives_being_written_and_read(self, tmp_path: Path):
+        path = yolo.write_data_yaml(tmp_path / "data.yaml", yolo.ClassList(AWKWARD_NAMES))
+        assert yolo.read_data_yaml(path)[0].names == AWKWARD_NAMES
+
+    def test_a_trainer_reads_the_written_names_as_the_same_text(self, tmp_path: Path):
+        """Trainers load data.yaml with an ordinary YAML loader, which types
+        what it reads. So this checks with one, not with our own reader."""
+        import yaml
+
+        path = yolo.write_data_yaml(tmp_path / "data.yaml", yolo.ClassList(AWKWARD_NAMES))
+        loaded = yaml.safe_load(path.read_text(encoding="utf-8"))["names"]
+        assert [loaded[i] for i in range(len(AWKWARD_NAMES))] == AWKWARD_NAMES
+        assert all(isinstance(name, str) for name in loaded.values())
+
+    def test_ordinary_names_are_still_written_bare(self, tmp_path: Path):
+        path = yolo.write_data_yaml(
+            tmp_path / "data.yaml", yolo.ClassList(["cat", "traffic light", "Open"])
+        )
+        text = path.read_text(encoding="utf-8")
+        assert "  0: cat\n  1: traffic light\n  2: Open\n" in text
+
+    def test_names_keyed_by_something_other_than_a_number_fail_by_name(self, tmp_path: Path):
+        path = tmp_path / "data.yaml"
+        path.write_text("names:\n  first: cat\n", encoding="utf-8")
+        with pytest.raises(AnnotationError, match="data.yaml"):
+            yolo.read_data_yaml(path)

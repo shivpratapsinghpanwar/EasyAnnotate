@@ -249,23 +249,77 @@ def write_data_yaml(
     lines.append(f"nc: {len(classes)}")
     lines.append("names:")
     for index, name in enumerate(classes.names):
-        lines.append(f"  {index}: {name}")
+        lines.append(f"  {index}: {_yaml_name(name)}")
     return write_text_atomic(path, "\n".join(lines) + "\n")
 
 
+#: Words a YAML loader may read as a boolean or as nothing at all. PyYAML is
+#: asked directly below; "y" and "n" are here for the loaders that follow the
+#: YAML 1.1 list in full.
+_YAML_WORDS = frozenset({"y", "n", "yes", "no", "on", "off", "true", "false", "null", "~"})
+
+
+def _yaml_name(name: str) -> str:
+    """A class name as YAML: bare when that is safe, quoted when it is not.
+
+    Trainers load data.yaml with an ordinary YAML loader, which decides for
+    itself what a bare word is: ``no`` is False, ``010`` is 8, ``1.50`` is
+    1.5, ``~`` is nothing, and a name holding ``: `` or starting with ``#``
+    is not a name at all. So a name is written bare only when it reads back
+    as exactly the same text; otherwise it goes in double quotes, which every
+    loader reads as text. Ordinary names stay bare and the file stays plain.
+    """
+    import yaml
+
+    safe = name.strip() == name and name.lower() not in _YAML_WORDS and not _is_number(name)
+    if safe:
+        try:
+            safe = yaml.safe_load(f"k: {name}\n") == {"k": name}
+        except yaml.YAMLError:
+            safe = False
+    if safe:
+        return name
+    quoted = yaml.safe_dump(name, default_style='"', allow_unicode=True, width=float("inf"))
+    return quoted.rstrip("\n")
+
+
+def _is_number(text: str) -> bool:
+    """Whether some YAML dialect could read this as a number (12, 1e3, 0o17)."""
+    for parse in (float, lambda value: int(value, 0)):
+        try:
+            parse(text)
+            return True
+        except ValueError:
+            continue
+    return False
+
+
 def read_data_yaml(path: Path) -> tuple[ClassList, dict[str, str]]:
-    """Read a ``data.yaml``, accepting both the list and dict ``names`` styles."""
+    """Read a ``data.yaml``, accepting both the list and dict ``names`` styles.
+
+    Every value is read as text. A typed load renames classes -- ``no``
+    becomes False, ``010`` becomes 8, ``1.50`` becomes 1.5 -- and a class that
+    comes back under another name is a different class to everything after.
+    """
     import yaml
 
     try:
-        document: dict[str, Any] = yaml.safe_load(path.read_text(encoding="utf-8-sig")) or {}
+        # BaseLoader builds strings, lists and mappings, and nothing else.
+        document: Any = yaml.load(path.read_text(encoding="utf-8-sig"), Loader=yaml.BaseLoader)
     except Exception as exc:
         raise AnnotationError(f"{path.name}: cannot parse ({exc})") from exc
+    if not isinstance(document, dict):
+        raise AnnotationError(f"{path.name}: no usable 'names' entry")
 
     raw = document.get("names")
     if isinstance(raw, dict):
         # ``{0: cat, 1: dog}`` -- order by index, not by insertion.
-        names = [str(raw[k]) for k in sorted(raw, key=lambda k: int(k))]
+        try:
+            names = [str(raw[k]) for k in sorted(raw, key=lambda k: int(k))]
+        except (TypeError, ValueError) as exc:
+            raise AnnotationError(
+                f"{path.name}: 'names' must be keyed by class number ({exc})"
+            ) from exc
     elif isinstance(raw, list):
         names = [str(n) for n in raw]
     else:

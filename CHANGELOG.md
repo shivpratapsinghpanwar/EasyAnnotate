@@ -34,6 +34,12 @@ second implementation across every pair of formats.
   is read when there is no `data.yaml`.
 - When `--classes` reorders a YOLO dataset that has its own names file, the
   run says which class moved from which number to which.
+- Class names in `data.yaml` are read as text. YAML typing renamed them:
+  `no` became `False`, `yes` `True`, `010` `8`, `1.50` `1.5`, `~` `None`,
+  `0x1F` `31`.
+- A class name that YAML would change or misread is written in double
+  quotes (`0: "no"`, `1: "a: b"`, `2: "#tag"`), so it reads back exactly,
+  here and in a trainer. Ordinary names are written bare, as before.
 
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the
