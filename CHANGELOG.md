@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.2 — converters that keep what they are given
 
 Converter fixes, found by comparing this tool's output byte for byte with a
 second implementation across every pair of formats.

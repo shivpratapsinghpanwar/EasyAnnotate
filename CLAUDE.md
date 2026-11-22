@@ -37,7 +37,7 @@ M1 (editor essentials), M2 (shipping: `easyannotate` CLI, demo, wheel and
 binary run), M2.5 (desktop window), M3 (AI assist: SAM box/click, YOLO-World
 text prompts, batch prompt → predictions, SAM encode-ahead), M4 (the loop:
 `easyannotate train/predict`, uncertainty-ordered review queue) and the
-rotated-box/line/point half of M5.** 788 tests pass, including 32 browser tests
+rotated-box/line/point half of M5.** 910 tests pass, including 32 browser tests
 (install playwright). `docs/bench_scale.py` measures 20k images: all gates pass.
 
 **Three front ends, as the owner asked (Oct 2026):** (1) the browser bound to
@@ -84,8 +84,8 @@ index, retiring keeps the slot, new classes append. It used to be
 
 ## Not done / unverified
 
-- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **v0.4.1 is
-  released** by `release.yml` (tag `v0.4.1`; 0.4.0 was the first public release): desktop zips for Windows, macOS
+- **CI (`ci.yml`) is green** (Linux and Windows, wheel, Docker). **v0.4.2 is
+  released** by `release.yml` (tag `v0.4.2`; 0.4.0 was the first public release): desktop zips for Windows, macOS
   and Linux, each smoke-tested in CI, unsigned. macOS produces a folder, not
   a `.app`.
 - **The repository is public** (since 2026-10-15). **Both packages are on
