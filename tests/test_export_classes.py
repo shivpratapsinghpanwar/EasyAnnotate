@@ -245,6 +245,29 @@ def test_every_format_exports_from_a_project(store, project, tmp_path, fmt):
     assert result.counts["objects"] == 1
 
 
+def test_a_coco_export_from_a_project_is_signed_easyannotate(store, project, tmp_path):
+    """This is the file the editor's Export button writes. Its info block
+    said "Data Factory export (train)", the name the product had before."""
+    import json
+
+    add_image(store, project, "a.jpg", [("Open", (10, 10, 100, 100))])
+    out = tmp_path / "coco"
+    result = run_export(store.path, project.id, out, to="coco")
+    assert result.ok, result.errors
+    written = sorted((out / "annotations").glob("instances_*.json"))
+    assert written, "the export wrote no COCO file"
+    for path in written:
+        description = json.loads(path.read_text(encoding="utf-8"))["info"]["description"]
+        assert description.startswith("EasyAnnotate export ("), description
+
+
+def test_the_coco_builder_signs_easyannotate_when_not_told_otherwise():
+    """Anything that builds COCO without naming a description gets this one."""
+    from data_factory.core.annotations.coco import CocoBuilder
+
+    assert CocoBuilder().description == "EasyAnnotate export"
+
+
 def test_polygons_survive_the_round_trip(store, project, tmp_path):
     image = images.add(store, project, "poly.jpg", width=640, height=480)
     shapes.replace_all(

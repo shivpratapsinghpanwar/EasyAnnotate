@@ -59,6 +59,18 @@ class TestConvert:
         result = run("convert.dataset", {"folder": str(clean_dataset), "output": str(tmp_path / "o"), "to": "coco"})
         assert result.data["source_format"] == "voc"
 
+    def test_a_conversion_to_coco_is_signed_easyannotate(self, clean_dataset: Path, tmp_path: Path):
+        """Conversion and the editor's own export share a third COCO writer,
+        and its info block said "Data Factory export (train)"."""
+        out = tmp_path / "coco"
+        result = run("convert.dataset", {"folder": str(clean_dataset), "output": str(out), "to": "coco"})
+        assert result.ok, result.errors
+        written = sorted((out / "annotations").glob("instances_*.json"))
+        assert written, "the conversion wrote no COCO file"
+        for path in written:
+            description = json.loads(path.read_text(encoding="utf-8"))["info"]["description"]
+            assert description.startswith("EasyAnnotate export ("), description
+
     def test_converting_in_place_is_refused(self, clean_dataset: Path):
         result = run("convert.dataset", {"folder": str(clean_dataset), "output": str(clean_dataset), "to": "yolo"})
         assert not result.ok

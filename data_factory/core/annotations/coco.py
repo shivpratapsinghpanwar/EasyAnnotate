@@ -70,7 +70,7 @@ class CocoBuilder:
 
     def __init__(
         self,
-        description: str = "Data Factory export",
+        description: str = "EasyAnnotate export",
         version: str = "1.0",
         case_policy: str = "casefold",
         label_map: dict[str, str] | None = None,
