@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- An armed Assist helper takes the drag over any drawing tool; over Box it silently drew a plain box.
+
 ## 0.4.1 — text prompts on machines without git
 
 - Text prompts work on machines without git. YOLO-World's text encoder,

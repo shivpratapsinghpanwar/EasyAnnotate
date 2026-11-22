@@ -74,7 +74,7 @@ export class AssistPanel {
   }
 
   // Arming is a toggle, not a mode you can get stuck in: clicking the armed
-  // tool again disarms it, and Escape does too.
+  // tool again disarms it, and so do Escape and picking a drawing tool.
   arm(tool) {
     this.armed = this.armed && this.armed.name === tool.name ? null : tool;
     for (const button of this.list.querySelectorAll("button")) {

@@ -117,9 +117,8 @@ class Editor {
           this.encodeTool = tool;
           this.prepareAhead();
         }
-        if (!tool) this.say("");
-        else if (this.assistPanel.wantsPoints(tool)) this.say(`${tool.title}: click the object`);
-        else this.say(`${tool.title}: drag a box around the object`);
+        this.showCurrentTool();
+        this.say(tool ? this.armedHint() : "");
       },
       onPrompt: (tool, text, scope) => this.runPrompt(tool, text, scope),
     });
@@ -590,6 +589,16 @@ class Editor {
         this.runTool(this.armedTool, { points: [[Math.round(ix), Math.round(iy)]] });
         return;
       }
+      // A box-prompted helper takes the drag, whichever drawing tool it was
+      // armed over. Only the select tool used to hand it one: armed over Box
+      // the drag drew a plain box, over Polygon it dropped a vertex, and the
+      // helper stayed lit with nothing said. Select keeps its own rules,
+      // below, so a shape can still be clicked and corrected while armed.
+      if (this.armedTool && this.tool !== this.tools.select) {
+        this.tools.box.pointerdown(event, ix, iy);
+        this.drawingBox = true;
+        return;
+      }
       // Left-drag with the select tool draws a box: no mode to enter, which
       // is the entire interaction argument of this product. That includes a
       // drag starting on a shape you have not selected -- a handle on a
@@ -659,7 +668,11 @@ class Editor {
           const draft = this.tools.box.draft();
           this.tools.box.cancel();
           this.drawingBox = false;
-          if (draft) this.runTool(this.armedTool, { box: draft.bbox });
+          // A click is not a box. It used to be sent as an empty one; now it
+          // says what the helper is waiting for, and how to stop it.
+          const [x1, y1, x2, y2] = draft ? draft.bbox : [0, 0, 0, 0];
+          if (x2 - x1 < boxTool.MIN_SIZE || y2 - y1 < boxTool.MIN_SIZE) this.say(this.armedHint());
+          else this.runTool(this.armedTool, { box: draft.bbox });
           return;
         }
         this.tools.box.pointerup(event);
@@ -868,6 +881,15 @@ class Editor {
       if (event.key === " " && !event.repeat) {
         this.spacePanning = true;
         this.canvas.style.cursor = "grab";
+        event.preventDefault();
+        return;
+      }
+
+      // A helper armed part-way through a polygon or a line: Escape puts the
+      // helper down and the outline is still there to finish. Asked first,
+      // the drawing tool threw the outline away and left the helper armed.
+      if (event.key === "Escape" && this.armedTool && !this.drawingBox && this.tool.draft()) {
+        this.assistPanel.disarm();
         event.preventDefault();
         return;
       }
@@ -1423,10 +1445,13 @@ class Editor {
     this.queueSave();
 
     const points = shapes[0].polygon ? shapes[0].polygon.length : 0;
+    // Only the select tool takes hold of a vertex; over any other, a press
+    // on one would be the helper's next drag.
+    const correct = this.tool === this.tools.select ? "drag a vertex" : "V, then drag a vertex";
     this.say(
       `${tool.title}: ${shapes.length} shape(s)` +
         (points ? `, ${points} points` : "") +
-        " — drag a vertex to correct it"
+        ` — ${correct} to correct it`
     );
   }
 
@@ -1515,12 +1540,14 @@ class Editor {
   setTool(name) {
     const tool = this.tools[name];
     if (!tool) return;
+    // Picking a drawing tool says "by hand", so it puts an armed helper
+    // down: whatever was picked last gets the drag. Select is not a drawing
+    // tool, and clicking and correcting shapes goes on working beside a
+    // helper, so it leaves one armed.
+    if (name !== "select") this.assistPanel.disarm();
     this.cancelTool();
     this.tool = tool;
-    for (const button of document.querySelectorAll("[data-tool]")) {
-      if (button.dataset.tool === name) button.dataset.current = "true";
-      else delete button.dataset.current;
-    }
+    this.showCurrentTool();
     this.canvas.style.cursor = name === "select" ? "default" : "crosshair";
     this.say(
       {
@@ -1532,6 +1559,30 @@ class Editor {
         obb: "rotated box: drag, then turn it with the handle or [ ]",
       }[name] || `${name} tool`
     );
+    // Still armed, so the drag is still the helper's: say that instead.
+    if (this.armedTool) this.say(this.armedHint());
+  }
+
+  // What is lit is what the next drag does: the helper while one is armed,
+  // and otherwise the drawing tool. Select stays lit beside a helper, since
+  // it still selects and corrects. Decided here and nowhere else, from the
+  // tool and the armed helper, and for the toolbar's buttons only: the
+  // Assist panel's carry data-tool too and light themselves. Lighting every
+  // [data-tool] from the tool alone un-lit a helper that was still armed.
+  showCurrentTool() {
+    const taken = this.armedTool && this.tool !== this.tools.select;
+    for (const button of document.querySelectorAll("header [data-tool]")) {
+      if (button.dataset.tool === this.tool.name && !taken) button.dataset.current = "true";
+      else delete button.dataset.current;
+    }
+  }
+
+  // What an armed helper is waiting for, and the way out of it.
+  armedHint() {
+    const gesture = this.assistPanel.wantsPoints(this.armedTool)
+      ? "click the object"
+      : "drag a box around the object";
+    return `${this.armedTool.title || this.armedTool.name}: ${gesture} · Esc to draw by hand`;
   }
 
   cancelTool() {
