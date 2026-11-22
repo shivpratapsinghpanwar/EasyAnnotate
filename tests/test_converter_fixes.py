@@ -733,16 +733,20 @@ class TestNothingIsLostQuietly:
         dataset = one_image(tmp_path, POLYGON, POLYGON, ROTATED, BOX)
         report = formats.write_dataset(dataset, tmp_path / "out", "dota", ctx=Context())
         assert report["warnings"] == [
-            "2 outline(s) were written as their bounding boxes: dota stores "
-            "four-corner boxes, not outlines"
+            (
+                "2 outline(s) were written as their bounding boxes: dota stores "
+                "four-corner boxes, not outlines"
+            )
         ]
 
     def test_dota_says_which_class_names_it_had_to_change(self, tmp_path):
         dataset = one_image(tmp_path, Shape("traffic light", (10, 20, 50, 60)), BOX)
         report = formats.write_dataset(dataset, tmp_path / "out", "dota", ctx=Context())
         assert report["warnings"] == [
-            "1 class name(s) hold spaces, which DOTA uses to separate fields, and "
-            "were written with hyphens: 'traffic light' -> 'traffic-light'"
+            (
+                "1 class name(s) hold spaces, which DOTA uses to separate fields, and "
+                "were written with hyphens: 'traffic light' -> 'traffic-light'"
+            )
         ]
 
 
