@@ -18,7 +18,7 @@ from conftest import IMAGE_SIZE, make_image, make_pair
 import data_factory as df
 from data_factory.annotate import review
 from data_factory.core.annotations import coco as coco_fmt
-from data_factory.core.annotations import dota, formats, labelme, voc, yolo
+from data_factory.core.annotations import csvfmt, dota, formats, labelme, voc, yolo
 from data_factory.core.annotations.model import Annotation, AnnotationError, Shape
 from data_factory.core.types import Context
 from data_factory.core.writer import DatasetWriter
@@ -629,3 +629,27 @@ class TestYoloClipping:
         dataset = dataset_of(Shape("cat", (-10, 10, 50, 70), polygon=outline))
         report = formats.write_dataset(dataset, tmp_path / "out", "yolo", ctx=Context())
         assert any("1 outline(s) have points outside" in str(w) for w in report["warnings"])
+
+
+# --------------------------------------------------------------------- CSV
+
+
+class TestCsv:
+    def test_a_line_break_inside_a_quoted_field_survives(self, tmp_path: Path):
+        """The file was split into lines before it was parsed, so a quoted
+        field holding a line break became two broken rows."""
+        shapes = [Shape("two\nwords", (1, 2, 30, 40)), Shape("plain", (5, 6, 70, 80))]
+        path = csvfmt.write([Annotation("a.jpg", W, H, shapes=shapes)], tmp_path / "a.csv")
+        back = csvfmt.read(path)
+        assert len(back) == 1
+        assert [(s.label, s.bbox) for s in back[0].shapes] == [
+            ("two\nwords", (1, 2, 30, 40)), ("plain", (5, 6, 70, 80)),
+        ]
+
+    def test_a_two_point_line_reads_back(self, tmp_path: Path):
+        """The writer emits a two-point line; the reader wanted three points."""
+        line = Shape("seam", (10, 10, 90, 60), polygon=[(10, 10), (90, 60)], kind="line")
+        path = csvfmt.write([Annotation("a.jpg", W, H, shapes=[line])], tmp_path / "a.csv")
+        back = csvfmt.read(path)[0].shapes[0]
+        assert back.shape_kind == "line"
+        assert back.polygon == [(10, 10), (90, 60)]

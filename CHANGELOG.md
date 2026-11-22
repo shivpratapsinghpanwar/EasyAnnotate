@@ -40,6 +40,9 @@ second implementation across every pair of formats.
 - A class name that YAML would change or misread is written in double
   quotes (`0: "no"`, `1: "a: b"`, `2: "#tag"`), so it reads back exactly,
   here and in a trainer. Ordinary names are written bare, as before.
+- CSV: a quoted field holding a line break is read as one field (the file
+  was split into lines before parsing, which broke the row in two), and a
+  two-point line, which the writer emits, reads back.
 
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the

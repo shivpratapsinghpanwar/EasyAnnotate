@@ -87,11 +87,17 @@ def write(annotations: Iterable[Annotation], path: Path) -> Path:
 def read(path: Path) -> list[Annotation]:
     """Read a CSV back into one :class:`Annotation` per distinct filename."""
     try:
-        text = path.read_text(encoding="utf-8-sig")
+        # newline="" hands the csv module the file as it is, which is what it
+        # asks for: a quoted field may hold a line break, and splitting the
+        # text into lines first cut such a row in two.
+        with path.open(encoding="utf-8-sig", newline="") as handle:
+            text = handle.read()
     except OSError as exc:
         raise AnnotationError(f"{path.name}: cannot read ({exc})") from exc
+    except UnicodeDecodeError as exc:
+        raise AnnotationError(f"{path.name}: not UTF-8 text ({exc})") from exc
 
-    reader = csv.DictReader(text.splitlines())
+    reader = csv.DictReader(io.StringIO(text, newline=""))
     if not reader.fieldnames:
         raise AnnotationError(f"{path.name}: empty file")
 
@@ -165,7 +171,8 @@ def _parse_polygon(raw: str | None) -> list[Point] | None:
     if not raw or not raw.strip():
         return None
     numbers: Sequence[str] = raw.replace(",", " ").split()
-    if len(numbers) < 6 or len(numbers) % 2:
+    # Two points are enough: that is a line, and the writer emits it.
+    if len(numbers) < 4 or len(numbers) % 2:
         return None
     try:
         values = [float(n) for n in numbers]
