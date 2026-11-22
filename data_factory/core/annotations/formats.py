@@ -153,8 +153,21 @@ def _sniff_by_extension(folder: Path) -> str:
     )
 
 
+def _in_order(paths: Iterable[Path], root: Path) -> list[Path]:
+    """Files in the one order they are read in, on every platform.
+
+    By path under the dataset folder, compared one folder name at a time, by
+    Unicode code point -- so ``B.jpg`` comes before ``a.jpg``, as it always
+    has on Linux and macOS. Sorting the ``Path`` objects themselves is not
+    that: on Windows they compare without regard to case, so the same folder
+    was read in a different order there, and a COCO or CSV made from it
+    numbered and listed its images differently.
+    """
+    return sorted(paths, key=lambda path: fs.relative_to_safe(path, root).parts)
+
+
 def _looks_like_dota(folder: Path) -> bool:
-    for path in folder.rglob("*.txt"):
+    for path in _in_order(folder.rglob("*.txt"), folder):
         if not path.is_file() or path.name == "classes.txt":
             continue
         try:
@@ -347,7 +360,7 @@ def _read_yolo(
     # YOLO stores coordinates normalised, so every label needs its image's
     # dimensions before it can be read at all -- one header read per image.
     # Serial, that is the dominant cost of loading a large YOLO dataset.
-    images = list(fs.iter_images(folder, recursive=recursive))
+    images = _in_order(fs.iter_images(folder, recursive=recursive), folder)
     sizes = dict(
         parallel.collect(
             images,
@@ -403,7 +416,7 @@ def _read_dota(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     """Like YOLO -- one .txt beside or under labels/ per image -- but the class
     is named in the file, so there is no list to find."""
     dataset = Dataset()
-    images = list(fs.iter_images(folder, recursive=recursive))
+    images = _in_order(fs.iter_images(folder, recursive=recursive), folder)
     sizes = dict(
         parallel.collect(
             images,
@@ -506,7 +519,7 @@ def _read_coco(
 
 def _read_csv(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     dataset = Dataset()
-    candidates = sorted(folder.rglob("*.csv")) if recursive else sorted(folder.glob("*.csv"))
+    candidates = _in_order(folder.rglob("*.csv") if recursive else folder.glob("*.csv"), folder)
     if not candidates:
         raise AnnotationError(f"no .csv annotation file found under {folder}")
 
@@ -529,7 +542,7 @@ def _image_index(folder: Path) -> dict[str, list[Path]]:
     one in the right split rather than whichever sorted first.
     """
     index: dict[str, list[Path]] = {}
-    for image in fs.iter_images(folder, recursive=True):
+    for image in _in_order(fs.iter_images(folder, recursive=True), folder):
         index.setdefault(image.name, []).append(image)
         if image.stem != image.name:
             index.setdefault(image.stem, []).append(image)

@@ -92,6 +92,20 @@ second implementation across every pair of formats.
   with a `score` field, as VOC writes `<score>`; objects without one are
   unchanged. A point written by this tool as a COCO keypoint reads back as
   a point, not as a one-pixel box.
+- **Label files have the same bytes on every platform.** YOLO and DOTA
+  `.txt`, `data.yaml`, VOC `.xml`, LabelMe and COCO `.json` are written with
+  LF line endings; on Windows they used to get CRLF. CSV keeps the CRLF row
+  terminator of the csv module, as before, on every platform. An attached
+  folder's label files change to LF as they are next saved.
+- **VOC XML no longer depends on the Python version.** It was produced by
+  minidom, which writes a double quote in a class name as `&quot;` on
+  Python 3.12 and as `"` on 3.13. The tool now writes the XML itself: the
+  same layout, with `&`, `<` and `>` escaped in text and nothing else.
+- **YOLO, DOTA, COCO and CSV datasets are read in one order everywhere:** by
+  path inside the dataset, one folder name at a time, by Unicode code point
+  (`B.jpg` before `a.jpg`). On Windows the order ignored case, so the same
+  folder gave different COCO image ids and CSV row order than on Linux or
+  macOS, where nothing changes.
 
 ## 0.4.1 — text prompts on machines without git
 

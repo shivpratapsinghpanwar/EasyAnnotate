@@ -149,7 +149,7 @@ class CocoBuilder:
 
     def write(self, path: Path) -> Path:
         path.parent.mkdir(parents=True, exist_ok=True)
-        write_text_atomic(path, json.dumps(self.build(), indent=2))
+        write_text_atomic(path, json.dumps(self.build(), indent=2), newline="\n")
         return path
 
     def stats(self) -> dict[str, int]:
@@ -468,14 +468,15 @@ def find_annotation_files(folder: Path) -> list[Path]:
     """Locate COCO json files under the layouts exporters actually produce."""
     candidates: list[Path] = []
     for pattern in ("_annotations.coco.json", "instances*.json", "*.json"):
-        for path in sorted(folder.glob(pattern)):
+        # By name as text: Path objects sort without regard to case on Windows.
+        for path in sorted(folder.glob(pattern), key=lambda p: p.name):
             if path.is_file() and path not in candidates:
                 candidates.append(path)
         if candidates:
             break
     annotations_dir = folder / "annotations"
     if annotations_dir.is_dir():
-        for path in sorted(annotations_dir.glob("*.json")):
+        for path in sorted(annotations_dir.glob("*.json"), key=lambda p: p.name):
             if path not in candidates:
                 candidates.append(path)
     return candidates

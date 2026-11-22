@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from pathlib import Path
-from xml.dom import minidom
 
 from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
@@ -151,52 +150,67 @@ def _read_polygon(obj: ET.Element) -> list[Point] | None:
 
 
 def write(annotation: Annotation, path: Path) -> Path:
-    """Serialise to Pascal VOC XML, emitting the indexed polygon dialect."""
-    root = ET.Element("annotation")
-    ET.SubElement(root, "folder").text = annotation.folder
-    ET.SubElement(root, "filename").text = annotation.filename
-    ET.SubElement(root, "path").text = annotation.filename
+    """Serialise to Pascal VOC XML, emitting the indexed polygon dialect.
 
-    source = ET.SubElement(root, "source")
-    ET.SubElement(source, "database").text = "Unknown"
-
-    size = ET.SubElement(root, "size")
-    ET.SubElement(size, "width").text = str(annotation.width)
-    ET.SubElement(size, "height").text = str(annotation.height)
-    ET.SubElement(size, "depth").text = str(annotation.depth)
-
-    ET.SubElement(root, "segmented").text = "1" if annotation.has_polygons else "0"
+    The XML is written here, line by line, rather than by a library. It used
+    to come from minidom, whose output is not the same on every Python: a
+    double quote in a class name is ``&quot;`` on 3.12 and a plain quote on
+    3.13. The rule is now fixed: two-space indent, ``&``, ``<`` and ``>``
+    escaped in text and nothing else, LF line endings on every platform.
+    For everything but that quote, it is the layout minidom produced.
+    """
+    lines = ['<?xml version="1.0" ?>', "<annotation>"]
+    lines.append(_leaf("folder", annotation.folder, 1))
+    lines.append(_leaf("filename", annotation.filename, 1))
+    lines.append(_leaf("path", annotation.filename, 1))
+    lines += ["  <source>", _leaf("database", "Unknown", 2), "  </source>"]
+    lines += [
+        "  <size>",
+        _leaf("width", annotation.width, 2),
+        _leaf("height", annotation.height, 2),
+        _leaf("depth", annotation.depth, 2),
+        "  </size>",
+    ]
+    lines.append(_leaf("segmented", "1" if annotation.has_polygons else "0", 1))
 
     for shape in annotation.shapes:
-        obj = ET.SubElement(root, "object")
-        ET.SubElement(obj, "name").text = shape.label
-        ET.SubElement(obj, "pose").text = shape.pose
-        ET.SubElement(obj, "truncated").text = str(shape.truncated)
-        ET.SubElement(obj, "difficult").text = str(shape.difficult)
-        ET.SubElement(obj, "occluded").text = str(shape.occluded)
+        lines.append("  <object>")
+        lines.append(_leaf("name", shape.label, 2))
+        lines.append(_leaf("pose", shape.pose, 2))
+        lines.append(_leaf("truncated", shape.truncated, 2))
+        lines.append(_leaf("difficult", shape.difficult, 2))
+        lines.append(_leaf("occluded", shape.occluded, 2))
         # Written only when there is one, so a hand-drawn label produces
         # byte-identical XML to before -- a <score>1.0</score> appearing on
         # every ground-truth object would be a lie about where it came from.
         if shape.confidence is not None:
-            ET.SubElement(obj, "score").text = f"{float(shape.confidence):.6f}"
+            lines.append(_leaf("score", f"{float(shape.confidence):.6f}", 2))
 
-        bndbox = ET.SubElement(obj, "bndbox")
-        ET.SubElement(bndbox, "xmin").text = str(shape.bbox[0])
-        ET.SubElement(bndbox, "ymin").text = str(shape.bbox[1])
-        ET.SubElement(bndbox, "xmax").text = str(shape.bbox[2])
-        ET.SubElement(bndbox, "ymax").text = str(shape.bbox[3])
+        lines.append("    <bndbox>")
+        for tag, value in zip(("xmin", "ymin", "xmax", "ymax"), shape.bbox):
+            lines.append(_leaf(tag, value, 3))
+        lines.append("    </bndbox>")
 
         if shape.has_polygon:
             assert shape.polygon is not None
-            polygon = ET.SubElement(obj, "polygon")
+            lines.append("    <polygon>")
             for index, (x, y) in enumerate(shape.polygon, start=1):
-                ET.SubElement(polygon, f"x{index}").text = str(int(x))
-                ET.SubElement(polygon, f"y{index}").text = str(int(y))
+                lines.append(_leaf(f"x{index}", int(x), 3))
+                lines.append(_leaf(f"y{index}", int(y), 3))
+            lines.append("    </polygon>")
+        lines.append("  </object>")
 
-    pretty = minidom.parseString(ET.tostring(root, encoding="unicode")).toprettyxml(indent="  ")
+    lines.append("</annotation>")
     # Atomic: a half-written XML is an unparseable label, and the original
     # is already gone by the time the write fails.
-    return write_text_atomic(path, pretty)
+    return write_text_atomic(path, "\n".join(lines) + "\n", newline="\n")
+
+
+def _leaf(tag: str, value: object, depth: int) -> str:
+    """One ``<tag>text</tag>`` line. An element with no text is ``<tag/>``."""
+    text = str(value).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    pad = "  " * depth
+    return f"{pad}<{tag}>{text}</{tag}>" if text else f"{pad}<{tag}/>"
 
 
 def write_background(filename: str, width: int, height: int, path: Path) -> Path:

@@ -804,3 +804,111 @@ class TestReadersCountWhatTheySkip:
         dataset = formats.read_dataset(tmp_path, "voc")
         assert dataset.stats()["objects"] == 1
         assert "2 VOC object(s) have no name and were skipped" in dataset.warnings
+
+
+# ------------------------------------------- the same bytes on every machine
+
+
+class TestSameBytesEverywhere:
+    """Output must not depend on the operating system or the Python version.
+    These compare bytes, not text: reading as text hides a carriage return."""
+
+    def test_voc_xml_is_exactly_this(self, tmp_path: Path):
+        """The XML came from minidom, which writes a double quote in text as
+        &quot; on Python 3.12 and as itself on 3.13."""
+        shapes = [
+            Shape('R&D "5" <x>', (1, 2, 30, 40), confidence=0.5, difficult=1),
+            Shape("roof", (10, 10, 60, 70), polygon=[(10, 10), (60, 10), (60, 70)]),
+        ]
+        path = voc.write(Annotation("a.jpg", 120, 90, shapes=shapes, folder=""), tmp_path / "a.xml")
+        assert path.read_bytes() == (
+            b'<?xml version="1.0" ?>\n'
+            b"<annotation>\n"
+            b"  <folder/>\n"
+            b"  <filename>a.jpg</filename>\n"
+            b"  <path>a.jpg</path>\n"
+            b"  <source>\n"
+            b"    <database>Unknown</database>\n"
+            b"  </source>\n"
+            b"  <size>\n"
+            b"    <width>120</width>\n"
+            b"    <height>90</height>\n"
+            b"    <depth>3</depth>\n"
+            b"  </size>\n"
+            b"  <segmented>1</segmented>\n"
+            b"  <object>\n"
+            b'    <name>R&amp;D "5" &lt;x&gt;</name>\n'
+            b"    <pose>Unspecified</pose>\n"
+            b"    <truncated>0</truncated>\n"
+            b"    <difficult>1</difficult>\n"
+            b"    <occluded>0</occluded>\n"
+            b"    <score>0.500000</score>\n"
+            b"    <bndbox>\n"
+            b"      <xmin>1</xmin>\n"
+            b"      <ymin>2</ymin>\n"
+            b"      <xmax>30</xmax>\n"
+            b"      <ymax>40</ymax>\n"
+            b"    </bndbox>\n"
+            b"  </object>\n"
+            b"  <object>\n"
+            b"    <name>roof</name>\n"
+            b"    <pose>Unspecified</pose>\n"
+            b"    <truncated>0</truncated>\n"
+            b"    <difficult>0</difficult>\n"
+            b"    <occluded>0</occluded>\n"
+            b"    <bndbox>\n"
+            b"      <xmin>10</xmin>\n"
+            b"      <ymin>10</ymin>\n"
+            b"      <xmax>60</xmax>\n"
+            b"      <ymax>70</ymax>\n"
+            b"    </bndbox>\n"
+            b"    <polygon>\n"
+            b"      <x1>10</x1>\n"
+            b"      <y1>10</y1>\n"
+            b"      <x2>60</x2>\n"
+            b"      <y2>10</y2>\n"
+            b"      <x3>60</x3>\n"
+            b"      <y3>70</y3>\n"
+            b"    </polygon>\n"
+            b"  </object>\n"
+            b"</annotation>\n"
+        )
+        back = voc.read(path)
+        assert back.shapes[0].label == 'R&D "5" <x>'
+        assert back.shapes[1].polygon == [(10, 10), (60, 10), (60, 70)]
+
+    @pytest.mark.parametrize("fmt", ALL_FORMATS)
+    def test_line_endings_do_not_depend_on_the_platform(self, tmp_path: Path, fmt: str):
+        dataset = one_image(tmp_path, BOX, POLYGON)
+        out = tmp_path / "out"
+        formats.write_dataset(dataset, out, fmt, ctx=Context())
+        labels = [
+            p for p in out.rglob("*") if p.suffix in (".txt", ".xml", ".json", ".yaml", ".csv")
+        ]
+        assert labels
+        for path in labels:
+            data = path.read_bytes()
+            if path.suffix == ".csv":
+                # The csv module's own terminator, the same on every platform.
+                assert data.count(b"\r\n") == data.count(b"\n") == 3, path.name
+            else:
+                assert b"\r" not in data, path.name
+
+    @pytest.mark.parametrize("fmt", ["yolo", "dota"])
+    def test_images_are_read_in_one_order_everywhere(self, tmp_path: Path, fmt: str):
+        """Sorting Path objects is case-insensitive on Windows only, so the
+        same folder gave a different image order -- and different COCO image
+        ids -- on different machines."""
+        src = tmp_path / "src"
+        names = ["B.jpg", "a.jpg", "C.jpg", "sub/z.jpg", "sub-2/a.jpg"]
+        for seed, name in enumerate(names):
+            make_image(src / name, seed)
+            label = (src / name).with_suffix(".txt")
+            if fmt == "yolo":
+                label.write_text("0 0.5 0.5 0.2 0.2\n", encoding="utf-8")
+            else:
+                label.write_text("10 10 50 10 50 40 10 40 plane 0\n", encoding="utf-8")
+        dataset = formats.read_dataset(src, fmt)
+        order = [item.image.relative_to(src).as_posix() for item in dataset.items]
+        # By path, one folder name at a time, by code point: capitals first.
+        assert order == ["B.jpg", "C.jpg", "a.jpg", "sub/z.jpg", "sub-2/a.jpg"]

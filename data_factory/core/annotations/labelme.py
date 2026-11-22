@@ -184,5 +184,5 @@ def write(annotation: Annotation, path: Path, *, image_path: str | None = None) 
         "imageHeight": annotation.height,
         "imageWidth": annotation.width,
     }
-    write_text_atomic(path, json.dumps(document, indent=2))
+    write_text_atomic(path, json.dumps(document, indent=2), newline="\n")
     return path

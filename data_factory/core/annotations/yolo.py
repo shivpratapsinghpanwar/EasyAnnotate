@@ -221,7 +221,8 @@ def write(
             bh = (ymax - ymin) / height
             lines.append(f"{class_id} {cx:.6f} {cy:.6f} {bw:.6f} {bh:.6f}")
 
-    return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""))
+    # newline="\n": the same bytes on every platform, not CRLF on Windows.
+    return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""), newline="\n")
 
 
 def _unit(value: float) -> float:
@@ -288,7 +289,7 @@ def write_data_yaml(
     lines.append("names:")
     for index, name in enumerate(classes.names):
         lines.append(f"  {index}: {_yaml_name(name)}")
-    return write_text_atomic(path, "\n".join(lines) + "\n")
+    return write_text_atomic(path, "\n".join(lines) + "\n", newline="\n")
 
 
 #: Words a YAML loader may read as a boolean or as nothing at all. PyYAML is

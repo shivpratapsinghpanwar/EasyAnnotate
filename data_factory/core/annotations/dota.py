@@ -100,4 +100,4 @@ def write(annotation: Annotation, path: Path) -> Path:
             continue  # nothing rotated-box shaped to say about these
         coords = " ".join(f"{x} {y}" for x, y in corners_of(shape))
         lines.append(f"{coords} {class_name(shape.label)} {int(bool(shape.difficult))}")
-    return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""))
+    return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""), newline="\n")
