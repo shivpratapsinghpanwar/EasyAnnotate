@@ -21,6 +21,7 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 from .. import fs, parallel
 from ..pairs import PairIndex
@@ -91,17 +92,31 @@ def detect(folder: Path) -> str:
     is conclusive, while loose ``.json`` files need their contents inspected to
     tell LabelMe from COCO.
     """
-    folder = Path(folder)
+    return _sniff(Path(folder))[0]
+
+
+def _sniff(folder: Path) -> tuple[str, dict[Path, Any]]:
+    """:func:`detect`, plus the COCO document it had to parse to decide.
+
+    Telling COCO from LabelMe means parsing the file, and an instances.json
+    can be hundreds of megabytes. Handing the parsed document on lets
+    :func:`read_dataset` read it once rather than twice.
+    """
     if yolo.find_data_yaml(folder):
-        return "yolo"
+        return "yolo", {}
     if (folder / yolo.LABEL_DIR).is_dir():
         # DOTA uses the same images/ + labels/ layout; only the lines differ.
-        return "dota" if _looks_like_dota(folder) else "yolo"
+        return ("dota" if _looks_like_dota(folder) else "yolo"), {}
 
     for path in coco_fmt.find_annotation_files(folder):
-        if _looks_like_coco(path):
-            return "coco"
+        document = _coco_document(path)
+        if document is not None:
+            return "coco", {path: document}
 
+    return _sniff_by_extension(folder), {}
+
+
+def _sniff_by_extension(folder: Path) -> str:
     counts = {
         "voc": _count(folder, ".xml"),
         "labelme": _count(folder, ".json"),
@@ -156,14 +171,21 @@ def _count(folder: Path, suffix: str, limit: int = 1) -> int:
     return seen
 
 
-def _looks_like_coco(path: Path) -> bool:
-    """Peek at the head of the file rather than parsing a 200MB json."""
+def _coco_document(path: Path) -> Any | None:
+    """The parsed file if it is a COCO dataset, otherwise ``None``.
+
+    This used to peek at the first 4096 characters for the word "annotations"
+    or "categories", to avoid parsing a large file. A COCO file may list its
+    images first, and forty of them fill that window -- so this tool's own
+    export of 71 images was taken for LabelMe and read back, without an error,
+    as one empty image. A wrong answer that looks like success costs more than
+    a second or two of parsing, so the file is parsed and its keys decide.
+    """
     try:
-        with path.open("r", encoding="utf-8") as handle:
-            head = handle.read(4096)
-    except OSError:
-        return False
-    return '"categories"' in head or '"annotations"' in head
+        document = coco_fmt.load(path)
+    except AnnotationError:
+        return None
+    return document if coco_fmt.is_dataset(document) else None
 
 
 # ---------------------------------------------------------------- reading
@@ -177,19 +199,26 @@ def read_dataset(
 ) -> Dataset:
     """Load a folder into the neutral model, whatever format it is in."""
     folder = Path(folder)
-    resolved = detect(folder) if fmt in ("", "auto") else fmt
+    parsed: dict[Path, Any] = {}
+    if fmt in ("", "auto"):
+        resolved, parsed = _sniff(folder)
+    else:
+        resolved = fmt
     if resolved not in FORMATS:
         raise AnnotationError(f"unknown format {resolved!r}; known: {', '.join(FORMATS)}")
 
-    reader = {
-        "voc": _read_voc,
-        "yolo": _read_yolo,
-        "coco": _read_coco,
-        "labelme": _read_labelme,
-        "csv": _read_csv,
-        "dota": _read_dota,
-    }[resolved]
-    dataset = reader(folder, recursive, ctx or Context())
+    context = ctx or Context()
+    if resolved == "coco":
+        dataset = _read_coco(folder, recursive, context, parsed)
+    else:
+        reader = {
+            "voc": _read_voc,
+            "yolo": _read_yolo,
+            "labelme": _read_labelme,
+            "csv": _read_csv,
+            "dota": _read_dota,
+        }[resolved]
+        dataset = reader(folder, recursive, context)
     dataset.source_format = resolved
     return dataset
 
@@ -342,16 +371,42 @@ def _read_dota(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     return dataset
 
 
-def _read_coco(folder: Path, recursive: bool, ctx: Context) -> Dataset:
-    dataset = Dataset()
-    files = [p for p in coco_fmt.find_annotation_files(folder) if _looks_like_coco(p)]
-    if not files:
-        raise AnnotationError(f"no COCO annotation json found under {folder}")
+def _read_coco(
+    folder: Path, recursive: bool, ctx: Context, parsed: dict[Path, Any] | None = None
+) -> Dataset:
+    """Read every COCO dataset file under the folder.
 
-    images_by_name = _image_index(folder)
+    ``parsed`` holds documents the format sniff already loaded. Files are
+    handled one at a time so two large split files are never both in memory.
+    """
+    dataset = Dataset()
+    parsed = dict(parsed or {})
+    images_by_name: dict[str, list[Path]] | None = None
     unsupported: list[str] = []
-    for path in files:
-        document = coco_fmt.load(path)
+    problems: list[str] = []
+    read = 0
+
+    for path in coco_fmt.find_annotation_files(folder):
+        document = parsed.pop(path, None)
+        if document is None:
+            try:
+                document = coco_fmt.load(path)
+            except AnnotationError as exc:
+                # Named, and kept: if nothing else here is COCO this is the
+                # error; if something is, it is a warning beside the result.
+                problems.append(str(exc))
+                continue
+        if not coco_fmt.is_dataset(document):
+            if coco_fmt.is_detection_results(document):
+                problems.append(
+                    f"{path.name}: a bare list of detection results, not a dataset "
+                    f"(import it as predictions instead)"
+                )
+            continue
+
+        read += 1
+        if images_by_name is None:
+            images_by_name = _image_index(folder)
         split = _split_of(path.stem)
         try:
             annotations = coco_fmt.to_annotations(document, unsupported_out=unsupported)
@@ -375,6 +430,11 @@ def _read_coco(folder: Path, recursive: bool, ctx: Context) -> Dataset:
         for name in names:
             if name and name not in dataset.classes:
                 dataset.classes.append(name)
+
+    if not read:
+        detail = f": {'; '.join(problems[:3])}" if problems else ""
+        raise AnnotationError(f"no COCO annotation json found under {folder}{detail}")
+    dataset.warnings.extend(problems)
     dataset.warnings.extend(unsupported)
     return dataset
 

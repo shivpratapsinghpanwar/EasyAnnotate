@@ -13,7 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import IMAGE_SIZE, make_image
+from conftest import IMAGE_SIZE, make_image, make_pair
 
 import data_factory as df
 from data_factory.annotate import review
@@ -191,3 +191,112 @@ class TestMalformedJson:
         dataset = formats.read_dataset(tmp_path, "labelme")
         assert [item.annotation.filename for item in dataset.items] == ["a.jpg"]
         assert any("settings.json" in w for w in dataset.warnings)
+
+
+# ------------------------------------------------------- COCO or LabelMe?
+
+
+class TestCocoDetection:
+    """What a .json file is gets decided from its own top-level keys.
+
+    It used to be decided from the first 4096 characters, so a COCO file whose
+    ``images`` array came first and held more than about forty images -- which
+    includes this tool's own export -- was taken for LabelMe and read back as
+    one empty image.
+    """
+
+    def test_the_tools_own_coco_export_reads_back(self, tmp_path: Path):
+        src = tmp_path / "voc"
+        for index in range(71):
+            make_pair(src, f"img{index:03d}", "Open" if index % 2 else "Close", index)
+        source = formats.read_dataset(src, "voc")
+
+        out = tmp_path / "coco"
+        formats.write_dataset(source, out, "coco", ctx=Context())
+        exported = (out / "annotations" / "instances_train.json").read_text(encoding="utf-8")
+        assert '"annotations"' not in exported[:4096]  # the case the sniff missed
+
+        assert formats.detect(out) == "coco"
+        back = formats.read_dataset(out, "auto")
+        assert back.source_format == "coco"
+        assert back.stats()["images"] == 71
+        assert back.stats()["objects"] == 71
+        assert back.stats()["missing_images"] == 0
+
+        def content(dataset: formats.Dataset) -> list:
+            return sorted(
+                (item.annotation.filename, [(s.label, s.bbox) for s in item.annotation.shapes])
+                for item in dataset.items
+            )
+
+        assert content(back) == content(source)
+
+    def test_naming_the_format_reads_the_same_export(self, tmp_path: Path):
+        src = tmp_path / "voc"
+        for index in range(71):
+            make_pair(src, f"img{index:03d}", "Open", index)
+        out, again = tmp_path / "coco", tmp_path / "again"
+        run("convert.dataset", {"folder": str(src), "output": str(out), "to": "coco"})
+
+        result = run(
+            "convert.dataset",
+            {"folder": str(out), "output": str(again), "to": "voc", "source_format": "coco"},
+        )
+        assert result.ok, result.errors
+        assert result.counts["images"] == 71 and result.counts["objects"] == 71
+        assert len(list(again.rglob("*.xml"))) == 71
+
+    def test_a_compact_coco_file_with_many_images_first_is_coco(self, tmp_path: Path):
+        (tmp_path / "_annotations.coco.json").write_text(
+            json.dumps(coco_document(images=500)), encoding="utf-8"
+        )
+        assert formats.detect(tmp_path) == "coco"
+        assert formats.read_dataset(tmp_path, "auto").stats()["objects"] == 500
+
+    def test_a_labelme_file_is_not_coco_because_of_a_word_in_it(self, tmp_path: Path):
+        """A class called "categories" used to be enough to call the file COCO."""
+        make_image(tmp_path / "a.jpg", 1)
+        document = {
+            "shapes": [{"label": "categories", "points": [[1, 2], [30, 40]],
+                        "shape_type": "rectangle"}],
+            "imagePath": "a.jpg", "imageWidth": W, "imageHeight": H,
+        }
+        (tmp_path / "a.json").write_text(json.dumps(document), encoding="utf-8")
+        assert formats.detect(tmp_path) == "labelme"
+        assert formats.read_dataset(tmp_path, "auto").labels == ["categories"]
+
+    def test_a_broken_coco_file_is_named_even_when_its_start_gives_nothing_away(
+        self, tmp_path: Path
+    ):
+        src = tmp_path / "src"
+        (src / "annotations").mkdir(parents=True)
+        (src / "annotations" / "instances_train.json").write_text(
+            '{"images": [{"id": 1,', encoding="utf-8"
+        )
+        result = run(
+            "convert.dataset",
+            {"folder": str(src), "output": str(tmp_path / "out"), "to": "voc",
+             "source_format": "coco"},
+        )
+        assert not result.ok
+        assert "instances_train.json" in result.errors[0]
+        assert "cannot parse" in result.errors[0]
+
+    def test_a_results_list_is_not_a_dataset_and_the_error_says_so(self, tmp_path: Path):
+        (tmp_path / "results.json").write_text(
+            json.dumps([{"image_id": 1, "category_id": 1, "bbox": [1, 2, 3, 4], "score": 0.5}]),
+            encoding="utf-8",
+        )
+        with pytest.raises(AnnotationError, match="detection results"):
+            formats.read_dataset(tmp_path, "coco")
+
+    def test_a_good_file_is_read_and_a_broken_one_beside_it_is_reported(self, tmp_path: Path):
+        annotations = tmp_path / "annotations"
+        annotations.mkdir()
+        (annotations / "instances_train.json").write_text(
+            json.dumps(coco_document(images=3)), encoding="utf-8"
+        )
+        (annotations / "instances_val.json").write_text('{"images": [', encoding="utf-8")
+        dataset = formats.read_dataset(tmp_path, "coco")
+        assert dataset.stats()["images"] == 3
+        assert any("instances_val.json" in w for w in dataset.warnings)

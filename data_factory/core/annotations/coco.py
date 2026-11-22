@@ -204,6 +204,23 @@ def _score(ann: dict[str, Any]) -> float | None:
         return None
 
 
+def is_dataset(document: Any) -> bool:
+    """Whether a parsed JSON document is a COCO dataset.
+
+    Judged by its own top-level keys: an object holding an ``images``,
+    ``annotations`` or ``categories`` list, and no ``shapes`` (which is what a
+    LabelMe file has). Looking for those words in the first few kilobytes of
+    text instead got it wrong both ways -- a file whose ``images`` list came
+    first and ran past the window was not COCO, and a LabelMe file with a
+    class called "categories" was.
+    """
+    return (
+        isinstance(document, dict)
+        and "shapes" not in document
+        and any(isinstance(document.get(key), list) for key in ("images", "annotations", "categories"))
+    )
+
+
 def is_detection_results(document: Any) -> bool:
     """Whether this is the *detection results* form rather than a dataset.
 

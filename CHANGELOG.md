@@ -6,6 +6,12 @@ Converter fixes, found by comparing this tool's output byte for byte with a
 second implementation across every pair of formats.
 
 ### Fixed
+- A COCO file is recognised from its own top-level keys, not from its first
+  4096 characters. A file listing more than about 40 images before its
+  annotations, which includes this tool's own export, was taken for LabelMe:
+  re-reading a 71-image export returned success and one empty image, and
+  naming the format failed with "no COCO annotation json found". A LabelMe
+  file with a class called "categories" was taken for COCO.
 - A byte order mark at the start of a file is accepted by every reader:
   YOLO and DOTA `.txt`, LabelMe and COCO `.json`, VOC `.xml`, `data.yaml`.
   YOLO and DOTA files that began with one were skipped as malformed, LabelMe
