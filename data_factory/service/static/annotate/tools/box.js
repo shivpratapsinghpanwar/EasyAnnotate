@@ -13,7 +13,7 @@ export const cursor = "crosshair";
 
 //: Below this, in image pixels, it was a click and not a drag. Without it,
 //: every stray click leaves a zero-area box that exports as a broken label.
-const MIN_SIZE = 3;
+export const MIN_SIZE = 3;
 
 export function create(editor) {
   let start = null;

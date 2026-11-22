@@ -1083,6 +1083,245 @@ def test_typing_a_class_fills_the_review_queue(browser, service_with_tools, bare
     assert not errors, errors
 
 
+# ------------------------------------ an armed helper and the drawing tools
+
+HELPER = "#tools button[data-tool='fake.box']"
+
+DRAWING_KEYS = (("v", "select"), ("b", "box"), ("o", "obb"), ("p", "polygon"), ("l", "line"), ("k", "point"))
+
+
+def _open_with_helper(browser, base, folder, name, errors):
+    """The editor with the fake helper's button on screen and a class made:
+    without a class, a drag is held for a name instead of becoming a shape."""
+    project = make_project(base, folder, name)
+    page = open_editor(browser, base, project["id"], errors)
+    page.wait_for_selector(HELPER, timeout=15_000)
+    page.keyboard.press("/")
+    page.keyboard.type("Door")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(600)
+    return page
+
+
+def _arm(page):
+    """Arm the helper, and wait until it has encoded the open image. A drag
+    before that is answered "not yet" and asked again, which is right -- but
+    the browser logs the refusal, and these tests fail on any console error."""
+    with page.expect_response(lambda response: response.url.endswith("/prepare"), timeout=15_000):
+        page.click(HELPER)
+    assert _armed(page) == "fake.box"
+
+
+def _armed(page):
+    return page.evaluate("window.__editor.armedTool ? window.__editor.armedTool.name : null")
+
+
+def _made(page):
+    """Who made each shape, and whether it carries an outline. A helper's
+    answer is the model's and has one; a box drawn by hand is neither."""
+    return page.evaluate(
+        "window.__editor.scene.order.map(id => { const s = window.__editor.scene.get(id);"
+        " return [s.origin, !!s.polygon]; })"
+    )
+
+
+def _lit(page):
+    """What is lit, as the person sees it: the toolbar, then the Assist panel."""
+    return page.evaluate(
+        "['header', '#tools'].map(where => [...document.querySelectorAll("
+        "`${where} [data-tool][data-current]`)].map(button => button.dataset.tool))"
+    )
+
+
+def test_an_armed_helper_takes_the_drag_from_the_box_tool(browser, service_with_tools, bare_images):
+    """Box in the toolbar, then a helper armed in the Assist panel: the drag
+    is the helper's. It used to draw a plain box -- the helper lit, its hint
+    on screen, the model never asked -- because only the select tool handed a
+    finished drag to a helper."""
+    errors: list[str] = []
+    page = _open_with_helper(browser, service_with_tools, bare_images, "armed-box", errors)
+    try:
+        page.click("header [data-tool='box']")
+        _arm(page)
+        drag(page, 300, 240, 520, 420)
+        page.wait_for_function("window.__editor.scene.order.length === 1", timeout=10_000)
+        assert _made(page) == [["model", True]], "the drag drew by hand instead of asking the helper"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_an_armed_helper_takes_the_drag_whichever_tool_is_current(browser, service_with_tools, bare_images):
+    """Rotated, Polygon, Line and Point too, where a press means something
+    else: armed over those, a drag dropped a vertex or a point and the helper
+    was never asked. The toolbar shows it -- a drawing tool the helper has
+    taken the drag from is not lit; Select is, because clicking and
+    correcting shapes goes on working beside a helper."""
+    errors: list[str] = []
+    page = _open_with_helper(browser, service_with_tools, bare_images, "armed-any", errors)
+    try:
+        for index, (key, tool) in enumerate(DRAWING_KEYS):
+            page.keyboard.press("Escape")  # nothing armed, whatever the last round left
+            page.keyboard.press(key)
+            _arm(page)
+            assert _lit(page) == [["select"] if tool == "select" else [], ["fake.box"]], tool
+            left = 200 + index * 95
+            drag(page, left, 200, left + 80, 320)
+            page.wait_for_function(f"window.__editor.scene.order.length === {index + 1}", timeout=10_000)
+            assert _made(page) == [["model", True]] * (index + 1), tool
+            assert _armed(page) == "fake.box", f"{tool}: one drag must not put the helper down"
+        # Nothing was left half-drawn in a tool the helper took the drag from.
+        assert page.evaluate(
+            "['polygon', 'line'].map(name => window.__editor.tools[name].draft())"
+        ) == [None, None]
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_the_last_thing_picked_gets_the_drag(browser, service_with_tools, bare_images):
+    """Arming is not a mode to get stuck in. Picking a drawing tool says "by
+    hand", so it puts the helper down; Select does not, because it is not a
+    drawing tool; and Escape gives back the tool the helper was armed over.
+    What is lit and what the drag does never disagree: a tool key used to
+    un-light an armed helper and leave it armed."""
+    errors: list[str] = []
+    page = _open_with_helper(browser, service_with_tools, bare_images, "last-pick", errors)
+    try:
+        _arm(page)
+        assert _lit(page) == [["select"], ["fake.box"]]
+        page.keyboard.press("b")
+        assert _armed(page) is None
+        assert _lit(page) == [["box"], []]
+        drag(page, 300, 240, 520, 420)
+        page.wait_for_function("window.__editor.scene.order.length === 1", timeout=10_000)
+        assert _made(page) == [["human", False]], "Box was picked last, so the drag draws a box"
+
+        _arm(page)
+        assert _lit(page) == [[], ["fake.box"]]
+        page.click("header [data-tool='select']")
+        assert _armed(page) == "fake.box"
+        assert _lit(page) == [["select"], ["fake.box"]]
+
+        page.click("header [data-tool='polygon']")
+        assert _armed(page) is None
+        assert _lit(page) == [["polygon"], []]
+        _arm(page)
+        assert _lit(page) == [[], ["fake.box"]]
+        page.keyboard.press("Escape")
+        assert _armed(page) is None
+        assert _lit(page) == [["polygon"], []]
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_escape_puts_the_helper_down_and_keeps_a_half_drawn_outline(browser, service_with_tools, bare_images):
+    """A helper armed part-way through a polygon, then Escape: the helper goes
+    and the outline is still there to finish. The drawing tool used to answer
+    Escape first -- the outline was thrown away and the helper stayed armed."""
+    errors: list[str] = []
+    page = _open_with_helper(browser, service_with_tools, bare_images, "armed-esc", errors)
+    try:
+        page.keyboard.press("p")
+        rect = page.locator("#canvas").bounding_box()
+        for dx, dy in [(220, 220), (360, 230), (330, 380)]:
+            page.mouse.click(rect["x"] + dx, rect["y"] + dy)
+            page.wait_for_timeout(70)
+        _arm(page)
+        page.keyboard.press("Escape")
+        assert _armed(page) is None
+        assert page.evaluate("window.__editor.tools.polygon.draft().points.length") == 3
+
+        page.keyboard.press("Enter")
+        page.wait_for_function("window.__editor.scene.order.length === 1", timeout=10_000)
+        assert _made(page) == [["human", True]]
+        assert _armed(page) is None
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_click_is_not_a_box_for_a_helper(browser, service_with_tools, bare_images):
+    """A helper that wants a box, armed over the point tool, and a bare click:
+    there is no box to send. Nothing is drawn and the model is not asked with
+    an empty one; the status line says what the helper is waiting for and how
+    to stop it."""
+    errors: list[str] = []
+    asked: list[str] = []
+    page = _open_with_helper(browser, service_with_tools, bare_images, "armed-click", errors)
+    page.on(
+        "request",
+        lambda request: asked.append(request.url) if request.url.endswith("/tools/fake.box") else None,
+    )
+    try:
+        page.keyboard.press("k")
+        _arm(page)
+        rect = page.locator("#canvas").bounding_box()
+        page.mouse.click(rect["x"] + 400, rect["y"] + 300)
+        page.wait_for_timeout(500)
+        assert asked == []
+        assert page.evaluate("window.__editor.scene.order.length") == 0
+        said = page.inner_text("#progress")
+        assert "drag a box" in said and "Esc" in said
+    finally:
+        page.close()
+    assert not errors, errors
+
+
+def test_a_click_helper_takes_the_click_whichever_tool_is_current(browser, service, bare_images):
+    """The helper that outlines from one click, over each drawing tool: the
+    click is the helper's, and the tool under it draws nothing of its own.
+
+    The fake sidecar has no click tool, so one stands in here: its spec goes
+    into the Assist panel as the server's would, and the page answers the
+    call. Everything between the click and the call is the editor's own."""
+    errors: list[str] = []
+    project = make_project(service, bare_images, "armed-point")
+    page = open_editor(browser, service, project["id"], errors)
+    try:
+        page.keyboard.press("/")
+        page.keyboard.type("Door")
+        page.keyboard.press("Enter")
+        page.wait_for_timeout(600)
+        page.evaluate(
+            """() => {
+              const editor = window.__editor;
+              editor.assistPanel.setTools({ tools: [{
+                name: "standin.click", title: "Stand-in click tool", kind: "interactive",
+                inputs: { type: "object", properties: { points: { type: "array" } }, required: ["points"] },
+              }] });
+              editor.api.runTool = async (projectId, name, { params, label }) => {
+                const [x, y] = params.points[0];
+                const [x1, y1, x2, y2] = [x - 20, y - 20, x + 20, y + 20];
+                return { shapes: [{
+                  label, bbox: [x1, y1, x2, y2], confidence: 0.9,
+                  polygon: [[x1, y1], [x2, y1], [x2, y2], [x1, y2]],
+                }] };
+              };
+            }"""
+        )
+        rect = page.locator("#canvas").bounding_box()
+        for index, (key, tool) in enumerate(DRAWING_KEYS):
+            page.keyboard.press("Escape")  # nothing armed, whatever the last round left
+            page.keyboard.press(key)
+            page.click("#tools button[data-tool='standin.click']")
+            assert _armed(page) == "standin.click"
+            assert _lit(page) == [["select"] if tool == "select" else [], ["standin.click"]], tool
+            page.mouse.click(rect["x"] + 220 + index * 95, rect["y"] + 260)
+            page.wait_for_function(f"window.__editor.scene.order.length === {index + 1}", timeout=10_000)
+            page.wait_for_timeout(150)
+            assert _made(page) == [["model", True]] * (index + 1), tool
+        assert page.evaluate(
+            "['polygon', 'line'].map(name => window.__editor.tools[name].draft())"
+        ) == [None, None]
+        page.wait_for_timeout(900)
+        assert page.inner_text("#status") == "saved"
+    finally:
+        page.close()
+    assert not errors, errors
+
+
 # ------------------------------------------- review hardest first, end to end
 
 

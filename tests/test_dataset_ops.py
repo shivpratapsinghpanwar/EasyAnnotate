@@ -170,6 +170,14 @@ class TestCocoExport:
         annotated = {a["image_id"] for a in document["annotations"]}
         assert len(document["images"]) - len(annotated) == 1
 
+    def test_the_info_block_names_easyannotate(self, clean_dataset: Path):
+        """The description is read by whoever is handed the dataset. It said
+        "Data Factory", the name the product had before."""
+        output = clean_dataset.parent / "coco_info"
+        df.run("export.coco", {"folder": clean_dataset, "output": output})
+        document = json.loads((output / "annotations" / "instances.json").read_text())
+        assert document["info"]["description"] == "EasyAnnotate export"
+
     def test_backgrounds_can_be_excluded(self, clean_dataset: Path):
         result = df.run(
             "export.coco",

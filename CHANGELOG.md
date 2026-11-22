@@ -58,6 +58,9 @@ second implementation across every pair of formats.
 - A COCO annotation with an outline but no usable `bbox` gets its box from
   the outline instead of being skipped.
 
+- An armed Assist helper takes the drag over any drawing tool; over Box it silently drew a plain box.
+- The HTML report and COCO exports sign themselves EasyAnnotate (the report with its version), not "Data Factory".
+
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the
   dataset's class list (the declared order, else the names sorted), and

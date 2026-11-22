@@ -827,7 +827,7 @@ def _write_coco(dataset, output, ctx, report, copy_images, segmentation, on_acti
 
     for split, items in sorted(by_split.items()):
         builder = coco_fmt.CocoBuilder(
-            description=f"Data Factory export ({split})", categories=categories
+            description=f"EasyAnnotate export ({split})", categories=categories
         )
         image_dir = output / split
         fs.ensure_dir(image_dir, ctx)
