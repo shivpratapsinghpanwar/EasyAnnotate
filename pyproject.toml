@@ -91,7 +91,7 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://shivpratapsinghpanwar.github.io/EasyAnnotate/"
+Homepage = "https://annotationfree4u.com"
 Source = "https://github.com/shivpratapsinghpanwar/EasyAnnotate"
 Issues = "https://github.com/shivpratapsinghpanwar/EasyAnnotate/issues"
 Changelog = "https://github.com/shivpratapsinghpanwar/EasyAnnotate/blob/main/CHANGELOG.md"

@@ -6,6 +6,10 @@
 class name — that is the whole workflow. Load a model's predictions and review
 them at a few images a minute. Export a dataset that is correct by construction.
 
+**Website: [annotationfree4u.com](https://annotationfree4u.com)** — try it in the browser, convert label
+files between six formats [without uploading them](https://annotationfree4u.com/convert), and see
+[each format on one real photo](https://annotationfree4u.com/formats).
+
 ```bash
 pip install easyannotate
 easyannotate demo                  # a sample project opens in your browser
