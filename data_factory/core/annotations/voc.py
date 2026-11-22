@@ -18,8 +18,13 @@ from ..fs import write_text_atomic
 from .model import Annotation, AnnotationError, Point, Shape
 
 
-def read(path: Path) -> Annotation:
-    """Parse a Pascal VOC XML file into an :class:`Annotation`."""
+def read(path: Path, *, dropped_out: list[str] | None = None) -> Annotation:
+    """Parse a Pascal VOC XML file into an :class:`Annotation`.
+
+    An object with no name cannot be kept -- there is nothing to call it --
+    and is noted in ``dropped_out``, one entry each, so a caller can count
+    them instead of losing them without a word.
+    """
     try:
         tree = ET.parse(path)
     except ET.ParseError as exc:
@@ -36,6 +41,8 @@ def read(path: Path) -> Annotation:
         shape = _read_object(obj, path)
         if shape is not None:
             shapes.append(shape)
+        elif dropped_out is not None:
+            dropped_out.append("no name")
 
     # Some tools omit <size>; recover it from the shapes so downstream COCO
     # export is not left with a zero-dimension image.

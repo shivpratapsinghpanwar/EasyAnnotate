@@ -86,11 +86,18 @@ def corners_of(shape: Shape) -> list[Point]:
     return [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
 
 
+def class_name(label: str) -> str:
+    """A class name as DOTA can hold it. Fields are separated by spaces, so a
+    space inside a name would split it; it is written as a hyphen instead.
+    The converter reports every name this changes."""
+    return label.replace(" ", "-")
+
+
 def write(annotation: Annotation, path: Path) -> Path:
     lines = []
     for shape in annotation.shapes:
         if shape.shape_kind in ("point", "line"):
             continue  # nothing rotated-box shaped to say about these
         coords = " ".join(f"{x} {y}" for x, y in corners_of(shape))
-        lines.append(f"{coords} {shape.label.replace(' ', '-')} {int(bool(shape.difficult))}")
+        lines.append(f"{coords} {class_name(shape.label)} {int(bool(shape.difficult))}")
     return write_text_atomic(path, "\n".join(lines) + ("\n" if lines else ""))

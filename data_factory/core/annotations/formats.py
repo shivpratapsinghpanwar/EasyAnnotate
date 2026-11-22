@@ -34,10 +34,23 @@ from .model import Annotation, AnnotationError
 
 FORMATS = ("voc", "yolo", "coco", "labelme", "csv", "dota")
 
-#: Formats able to carry a polygon outline. Converting out of one of these into
-#: a box-only format is lossy, and the converter says so rather than quietly
-#: flattening the masks.
-SEGMENTATION_FORMATS = frozenset({"voc", "yolo", "coco", "labelme"})
+#: Formats able to carry a polygon outline. Writing an outline to any other
+#: flattens it to its box, and the converter says so, with a count, rather
+#: than quietly dropping the masks. CSV is here: it has a polygon column.
+SEGMENTATION_FORMATS = frozenset({"voc", "yolo", "coco", "labelme", "csv"})
+
+#: Formats with somewhere to put a detector's score.
+SCORE_FORMATS = frozenset({"voc", "coco"})
+
+#: What a format does with a kind of shape it has no form of its own for.
+#: A kind that is absent is written as itself. This table describes the
+#: writers; tests/test_converter_fixes.py holds every row to what they do.
+_NO_FORM: dict[str, dict[str, str]] = {
+    "voc": {"line": "boxed", "point": "flattened"},
+    "yolo": {"line": "boxed", "point": "left out"},
+    "coco": {"line": "boxed"},
+    "dota": {"line": "left out", "point": "left out"},
+}
 
 
 @dataclass(slots=True)
@@ -261,17 +274,32 @@ def _read_sidecars(
     return dataset
 
 
+def _report_dropped(dataset: Dataset, dropped: list[str], what: str) -> None:
+    """One counted line per reason a reader could not keep an object."""
+    for reason, count in sorted(Counter(dropped).items()):
+        dataset.warnings.append(f"{count} {what} have {reason} and were skipped")
+
+
 def _read_voc(folder: Path, recursive: bool, ctx: Context) -> Dataset:
-    return _read_sidecars(folder, recursive, ".xml", voc.read)
+    dropped: list[str] = []
+
+    def parse(path: Path) -> Annotation:
+        return voc.read(path, dropped_out=dropped)
+
+    dataset = _read_sidecars(folder, recursive, ".xml", parse)
+    _report_dropped(dataset, dropped, "VOC object(s)")
+    return dataset
 
 
 def _read_labelme(folder: Path, recursive: bool, ctx: Context) -> Dataset:
     skipped: list[str] = []
+    dropped: list[str] = []
 
     def parse(path: Path) -> Annotation:
-        return labelme.read(path, skipped_out=skipped)
+        return labelme.read(path, skipped_out=skipped, dropped_out=dropped)
 
     dataset = _read_sidecars(folder, recursive, ".json", parse)
+    _report_dropped(dataset, dropped, "LabelMe shape(s)")
     if skipped:
         dataset.warnings.append(
             f"LabelMe shape types not representable as polygons were skipped: "
@@ -605,13 +633,6 @@ def write_dataset(
     report: dict[str, object] = {"format": fmt, "written": 0, "images": 0, "warnings": []}
     warnings: list[str] = report["warnings"]  # type: ignore[assignment]
 
-    if segmentation and fmt not in SEGMENTATION_FORMATS:
-        polygons = sum(1 for i in dataset.items if i.annotation.has_polygons)
-        if polygons:
-            warnings.append(
-                f"{fmt} cannot store outlines: {polygons} image(s) keep their boxes "
-                f"but lose their polygons"
-            )
     warnings.extend(_write_losses(dataset, fmt, segmentation))
 
     writer = {
@@ -635,21 +656,50 @@ def _write_losses(dataset: Dataset, fmt: str, segmentation: bool) -> list[str]:
     warnings a caller shows is the whole story.
     """
     tally: Counter[str] = Counter()
+    renamed: dict[str, str] = {}
+    no_form = _NO_FORM.get(fmt, {})
     for item in dataset.items:
         annotation = item.annotation
         for shape in annotation.shapes:
-            if fmt == "yolo":
+            kind = shape.shape_kind
+            if kind in no_form:
+                tally[f"{kind} {no_form[kind]}"] += 1
+                if no_form[kind] == "left out":
+                    continue
+            elif fmt == "yolo":
                 tally[
                     "yolo-"
                     + yolo.fate(shape, annotation.width, annotation.height, segmentation=segmentation)
                 ] += 1
+            elif fmt == "dota":
+                # A rotated box is four corners, which is what DOTA stores.
+                if segmentation and shape.has_polygon and kind != "obb":
+                    tally["outline boxed"] += 1
+            if shape.confidence is not None and fmt not in SCORE_FORMATS:
+                tally["score"] += 1
+            if fmt == "dota" and dota.class_name(shape.label) != shape.label:
+                renamed[shape.label] = dota.class_name(shape.label)
 
     texts = {
+        "outline boxed": "outline(s) were written as their bounding boxes: dota stores "
+        "four-corner boxes, not outlines",
+        "line boxed": f"line(s) were written as their bounding boxes: {fmt} has no line shape",
+        "line left out": f"line(s) were not written: {fmt} has no line shape",
+        "point flattened": f"point(s) were written as boxes with no area: {fmt} has no point shape",
+        "point left out": f"point(s) were not written: {fmt} has no point shape",
         "yolo-clipped": "box(es) reach outside their image and were cut to the part inside it",
         "yolo-dropped": "box(es) have no area inside their image and were not written",
         "yolo-outline": "outline(s) have points outside their image, which were moved onto its edge",
+        "score": f"detector score(s) were not written: {fmt} has no place for them",
     }
-    return [f"{tally[key]} {text}" for key, text in texts.items() if tally[key]]
+    notes = [f"{tally[key]} {text}" for key, text in texts.items() if tally[key]]
+    if renamed:
+        pairs = ", ".join(f"{old!r} -> {new!r}" for old, new in sorted(renamed.items()))
+        notes.append(
+            f"{len(renamed)} class name(s) hold spaces, which DOTA uses to separate "
+            f"fields, and were written with hyphens: {pairs}"
+        )
+    return notes
 
 
 def _copy_image(

@@ -25,13 +25,19 @@ SUPPORTED_SHAPES = ("polygon", "rectangle", "linestrip", "line", "point", "rotat
 
 
 def read(
-    path: Path, *, strict: bool = False, skipped_out: list[str] | None = None
+    path: Path,
+    *,
+    strict: bool = False,
+    skipped_out: list[str] | None = None,
+    dropped_out: list[str] | None = None,
 ) -> Annotation:
     """Parse a LabelMe ``.json``.
 
     Unhandled shape types are appended to ``skipped_out`` when one is given, so
     a converter can warn about them; :class:`Annotation` is a slots dataclass
-    and deliberately has nowhere to stash out-of-band notes.
+    and deliberately has nowhere to stash out-of-band notes. ``dropped_out``
+    gets one entry -- "no label" or "no points" -- for each shape that could
+    not be kept for that reason, so they can be counted.
     """
     try:
         # utf-8-sig: a byte order mark at the start is not part of the JSON.
@@ -57,10 +63,12 @@ def read(
 
     shapes: list[Shape] = []
     skipped: list[str] = []
+    dropped: list[str] = dropped_out if dropped_out is not None else []
     for raw in document["shapes"]:
         if not isinstance(raw, dict):
+            dropped.append("no label")
             continue
-        shape = _read_shape(raw, path, skipped)
+        shape = _read_shape(raw, path, skipped, dropped)
         if shape is not None:
             shapes.append(shape)
 
@@ -94,11 +102,17 @@ def _dimension(value: Any) -> int:
         return 0
 
 
-def _read_shape(raw: dict[str, Any], path: Path, skipped: list[str]) -> Shape | None:
+def _read_shape(
+    raw: dict[str, Any], path: Path, skipped: list[str], dropped: list[str]
+) -> Shape | None:
     label = str(raw.get("label") or "").strip()
     kind = str(raw.get("shape_type") or "polygon").lower()
     points_raw = raw.get("points") or []
-    if not label or not points_raw:
+    if not label:
+        dropped.append("no label")
+        return None
+    if not points_raw:
+        dropped.append("no points")
         return None
     if kind not in SUPPORTED_SHAPES:
         skipped.append(kind)

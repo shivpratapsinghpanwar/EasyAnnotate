@@ -74,12 +74,16 @@ class TestConvert:
         assert result.ok
         assert not out.exists() or not any(out.rglob("*.txt"))
 
-    def test_polygon_loss_to_csv_is_warned_about(self, tmp_path: Path):
+    def test_polygon_loss_is_warned_about_where_it_happens(self, tmp_path: Path):
+        """Was "to csv": that warning was false, CSV keeps the outline. DOTA is
+        the format that flattens one, and it says how many."""
         src = tmp_path / "src"
         make_image(src / "a.jpg", 1)
         write_voc(src / "a.xml", "Open", polygon=[(10, 10), (60, 10), (60, 70)])
-        result = run("convert.dataset", {"folder": str(src), "output": str(tmp_path / "o"), "to": "csv"})
-        assert any("lose their polygons" in w for w in result.warnings)
+        kept = run("convert.dataset", {"folder": str(src), "output": str(tmp_path / "c"), "to": "csv"})
+        assert kept.warnings == []
+        lost = run("convert.dataset", {"folder": str(src), "output": str(tmp_path / "d"), "to": "dota"})
+        assert any(w.startswith("1 outline(s) were written as their bounding boxes") for w in lost.warnings)
 
     def test_detect_reports_the_format_and_classes(self, clean_dataset: Path):
         result = run("convert.detect", {"folder": str(clean_dataset)})

@@ -43,6 +43,20 @@ second implementation across every pair of formats.
 - CSV: a quoted field holding a line break is read as one field (the file
   was split into lines before parsing, which broke the row in two), and a
   two-point line, which the writer emits, reads back.
+- The warning "csv cannot store outlines" is gone: it was false (CSV has a
+  polygon column and the outlines are in it). The outline warning now fires
+  only for DOTA, counts objects rather than images, and does not count
+  rotated boxes, which DOTA keeps.
+- Nothing is dropped without a counted warning any more. Reported now, each
+  as one line with a number: detector scores a format has no place for
+  (YOLO, LabelMe, CSV, DOTA); lines and points written to a format with no
+  such shape; DOTA class names whose spaces became hyphens; COCO
+  annotations that name an unknown image or have no usable box; COCO
+  outlines in several parts (the first is kept); LabelMe shapes with no
+  label or no points; VOC objects with no name. A dry run reports the same
+  lines as the real run.
+- A COCO annotation with an outline but no usable `bbox` gets its box from
+  the outline instead of being skipped.
 
 ### Changed output
 - **COCO category ids are the same in every split file.** They follow the
@@ -74,6 +88,10 @@ second implementation across every pair of formats.
   unchanged. The run counts the boxes it cut, the boxes it left out for
   having no area inside the image (these used to vanish silently), and the
   outlines that had points moved onto the edge.
+- **COCO keeps detector scores.** An object that carries a score is written
+  with a `score` field, as VOC writes `<score>`; objects without one are
+  unchanged. A point written by this tool as a COCO keypoint reads back as
+  a point, not as a one-pixel box.
 
 ## 0.4.1 — text prompts on machines without git
 

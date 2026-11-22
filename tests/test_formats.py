@@ -324,14 +324,19 @@ class TestRoundTrips:
         back = formats.read_dataset(out, fmt)
         assert back.items[0].annotation.has_polygons, fmt
 
-    def test_converting_to_csv_warns_that_outlines_are_lost(self, tmp_path: Path):
+    def test_converting_to_csv_keeps_outlines_and_does_not_warn(self, tmp_path: Path):
+        """This used to assert a "csv cannot store outlines" warning. The
+        warning was false: CSV has a polygon column and the outline is in it."""
+        polygon = [(10, 10), (60, 10), (60, 70)]
         src = tmp_path / "src"
         make_image(src / "a.jpg", 1)
-        write_voc(src / "a.xml", "Open", polygon=[(10, 10), (60, 10), (60, 70)])
+        write_voc(src / "a.xml", "Open", polygon=polygon)
         source = formats.read_dataset(src, "voc")
 
         report = formats.write_dataset(source, tmp_path / "out", "csv", ctx=Context())
-        assert any("lose their polygons" in str(w) for w in report["warnings"])
+        assert report["warnings"] == []
+        back = formats.read_dataset(tmp_path / "out", "csv")
+        assert back.items[0].annotation.shapes[0].polygon == polygon
 
     def test_dry_run_writes_nothing(self, clean_dataset: Path, tmp_path: Path):
         source = formats.read_dataset(clean_dataset, "voc")

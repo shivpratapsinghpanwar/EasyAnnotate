@@ -653,3 +653,154 @@ class TestCsv:
         back = csvfmt.read(path)[0].shapes[0]
         assert back.shape_kind == "line"
         assert back.polygon == [(10, 10), (90, 60)]
+
+
+# ------------------------------------------- what a conversion cannot keep
+
+POLYGON = Shape("roof", (10, 10, 60, 70), polygon=[(10, 10), (60, 10), (60, 70), (30, 50), (10, 70)])
+ROTATED = Shape("van", (20, 20, 80, 70), polygon=[(30, 20), (80, 35), (70, 70), (20, 55)], kind="obb")
+LINE = Shape("seam", (10, 10, 90, 60), polygon=[(10, 10), (50, 60), (90, 20)], kind="line")
+POINT = Shape("eye", (40, 30, 40, 30), kind="point")
+BOX = Shape("door", (10, 20, 50, 60))
+SCORED = Shape("door", (10, 20, 50, 60), confidence=0.875)
+KINDS = {"box": BOX, "polygon": POLYGON, "obb": ROTATED, "line": LINE, "point": POINT}
+ALL_FORMATS = ["voc", "yolo", "coco", "labelme", "csv", "dota"]
+
+
+def geometry(shape: Shape) -> tuple:
+    """What a shape *is*, ignoring how a format happens to spell it: a box and
+    the four-corner outline of the same rectangle are one thing."""
+    if shape.shape_kind == "point":
+        return ("point", tuple(shape.bbox[:2]))
+    if shape.shape_kind == "line":
+        return ("line", tuple(shape.polygon or ()))
+    if shape.has_polygon:
+        return ("area", tuple(shape.polygon or ()))
+    x1, y1, x2, y2 = shape.bbox
+    return ("area", ((x1, y1), (x2, y1), (x2, y2), (x1, y2)))
+
+
+def one_image(tmp_path: Path, *shapes: Shape) -> formats.Dataset:
+    image = make_image(tmp_path / "src" / "a.jpg", 1, size=(100, 80))
+    annotation = Annotation("a.jpg", 100, 80, shapes=list(shapes))
+    return formats.Dataset(items=[formats.Item(annotation=annotation, image=image)])
+
+
+class TestNothingIsLostQuietly:
+    @pytest.mark.parametrize("kind", list(KINDS))
+    @pytest.mark.parametrize("fmt", ALL_FORMATS)
+    def test_a_shape_comes_back_the_same_or_the_run_says_why(self, tmp_path, fmt, kind):
+        """Every format against every kind of shape: written, read back and
+        compared. A warning with no loss is as wrong as a loss with none."""
+        shape = KINDS[kind]
+        dataset = one_image(tmp_path, shape)
+        out = tmp_path / "out"
+        report = formats.write_dataset(dataset, out, fmt, ctx=Context())
+        back = formats.read_dataset(out, fmt)
+        shapes = [s for item in back.items for s in item.annotation.shapes]
+        kept = len(shapes) == 1 and geometry(shapes[0]) == geometry(shape)
+        assert kept == (report["warnings"] == []), (kept, report["warnings"])
+        if not kept:
+            assert str(report["warnings"][0]).startswith("1 ")  # counted
+
+        preview = formats.write_dataset(dataset, tmp_path / "dry", fmt, ctx=Context(dry_run=True))
+        assert preview["warnings"] == report["warnings"]
+
+    @pytest.mark.parametrize("fmt", ALL_FORMATS)
+    def test_a_detector_score_is_kept_or_counted(self, tmp_path, fmt):
+        dataset = one_image(tmp_path, SCORED, SCORED, BOX)
+        out = tmp_path / "out"
+        report = formats.write_dataset(dataset, out, fmt, ctx=Context())
+        back = formats.read_dataset(out, fmt)
+        scores = [s.confidence for item in back.items for s in item.annotation.shapes]
+        if fmt in ("voc", "coco"):
+            assert sorted(s for s in scores if s is not None) == [0.875, 0.875]
+            assert report["warnings"] == []
+        else:
+            assert scores == [None, None, None]
+            assert report["warnings"] == [
+                f"2 detector score(s) were not written: {fmt} has no place for them"
+            ]
+
+    def test_csv_keeps_outlines_and_does_not_claim_otherwise(self, tmp_path):
+        dataset = one_image(tmp_path, POLYGON)
+        report = formats.write_dataset(dataset, tmp_path / "out", "csv", ctx=Context())
+        assert report["warnings"] == []
+        back = formats.read_dataset(tmp_path / "out", "csv")
+        assert back.items[0].annotation.shapes[0].polygon == POLYGON.polygon
+
+    def test_dota_counts_objects_not_images_and_not_rotated_boxes(self, tmp_path):
+        dataset = one_image(tmp_path, POLYGON, POLYGON, ROTATED, BOX)
+        report = formats.write_dataset(dataset, tmp_path / "out", "dota", ctx=Context())
+        assert report["warnings"] == [
+            "2 outline(s) were written as their bounding boxes: dota stores "
+            "four-corner boxes, not outlines"
+        ]
+
+    def test_dota_says_which_class_names_it_had_to_change(self, tmp_path):
+        dataset = one_image(tmp_path, Shape("traffic light", (10, 20, 50, 60)), BOX)
+        report = formats.write_dataset(dataset, tmp_path / "out", "dota", ctx=Context())
+        assert report["warnings"] == [
+            "1 class name(s) hold spaces, which DOTA uses to separate fields, and "
+            "were written with hyphens: 'traffic light' -> 'traffic-light'"
+        ]
+
+
+class TestReadersCountWhatTheySkip:
+    def test_coco_annotations_that_cannot_be_used(self, tmp_path):
+        document = coco_document(images=2)
+        document["annotations"] += [
+            {"id": 90, "image_id": 999, "category_id": 1, "bbox": [1, 2, 3, 4]},
+            {"id": 91, "image_id": 1, "category_id": 1, "bbox": ["a", 2, 3, 4]},
+            {"id": 92, "image_id": 1, "category_id": 1, "bbox": [1, 2, 3]},
+            {"id": 93, "image_id": 2, "category_id": 1,
+             "segmentation": [[10, 10, 60, 10, 60, 70]]},
+        ]
+        notes: list[str] = []
+        annotations = coco_fmt.to_annotations(document, unsupported_out=notes)
+        assert sum(len(a.shapes) for a in annotations) == 3
+        assert "1 annotation(s) name an image that is not in 'images' and were skipped" in notes
+        assert "2 annotation(s) have no usable bbox or outline and were skipped" in notes
+        # No bbox, but an outline: the box is taken from the outline, not lost.
+        assert annotations[1].shapes[-1].bbox == (10, 10, 60, 70)
+
+    def test_coco_outlines_in_several_parts(self):
+        document = coco_document()
+        document["annotations"][0]["segmentation"] = [
+            [10, 10, 30, 10, 30, 30], [40, 40, 60, 40, 60, 60],
+        ]
+        notes: list[str] = []
+        annotations = coco_fmt.to_annotations(document, unsupported_out=notes)
+        assert annotations[0].shapes[0].polygon == [(10, 10), (30, 10), (30, 30)]
+        assert notes == [
+            "1 object(s) have an outline in several parts; only the first part of each was kept"
+        ]
+
+    def test_labelme_shapes_without_a_label(self, tmp_path):
+        make_image(tmp_path / "a.jpg", 1)
+        document = {
+            "shapes": [
+                {"label": "", "points": [[1, 2], [30, 40]], "shape_type": "rectangle"},
+                {"label": "cat", "points": [], "shape_type": "polygon"},
+                {"label": "cat", "points": [[1, 2], [30, 40]], "shape_type": "rectangle"},
+            ],
+            "imagePath": "a.jpg", "imageWidth": W, "imageHeight": H,
+        }
+        (tmp_path / "a.json").write_text(json.dumps(document), encoding="utf-8")
+        dataset = formats.read_dataset(tmp_path, "labelme")
+        assert dataset.stats()["objects"] == 1
+        assert "1 LabelMe shape(s) have no label and were skipped" in dataset.warnings
+        assert "1 LabelMe shape(s) have no points and were skipped" in dataset.warnings
+
+    def test_voc_objects_without_a_name(self, tmp_path):
+        make_image(tmp_path / "a.jpg", 1)
+        box = "<bndbox><xmin>1</xmin><ymin>2</ymin><xmax>30</xmax><ymax>40</ymax></bndbox>"
+        (tmp_path / "a.xml").write_text(
+            f"<annotation><filename>a.jpg</filename><object>{box}</object>"
+            f"<object><name> </name>{box}</object><object><name>cat</name>{box}</object>"
+            f"</annotation>",
+            encoding="utf-8",
+        )
+        dataset = formats.read_dataset(tmp_path, "voc")
+        assert dataset.stats()["objects"] == 1
+        assert "2 VOC object(s) have no name and were skipped" in dataset.warnings

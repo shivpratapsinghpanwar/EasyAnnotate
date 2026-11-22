@@ -124,6 +124,10 @@ class CocoBuilder:
             "area": round(shape.polygon_area(), 2),
             "iscrowd": 0,
         }
+        # Written only when there is one, as the VOC writer does, so a
+        # hand-drawn label is unchanged. The reader has always read it back.
+        if shape.confidence is not None:
+            entry["score"] = round(float(shape.confidence), 6)
         if shape.is_point:
             # COCO has no point type; a visible keypoint with a one-pixel box
             # is the form its keypoint evaluators and viewers both accept.
@@ -347,27 +351,50 @@ def to_annotations(
             shapes=[],
         )
 
-    rle_count = 0
+    rle_count = orphans = unusable = in_parts = 0
     for ann in _entries(coco, "annotations"):
         if not isinstance(ann, dict):
+            unusable += 1
             continue
         image_id = ann.get("image_id")
         annotation = by_image.get(image_id) if isinstance(image_id, (int, float, str)) else None
         if annotation is None:
-            continue
-        bbox = ann.get("bbox") or [0, 0, 0, 0]
-        try:
-            x, y, w, h = (float(v) for v in bbox[:4])
-            box = (int(round(x)), int(round(y)), int(round(x + w)), int(round(y + h)))
-        except (TypeError, ValueError, OverflowError):
+            orphans += 1
             continue
 
         segmentation = ann.get("segmentation")
         polygon: list[Point] | None = None
-        if isinstance(segmentation, dict) or ann.get("iscrowd"):
-            rle_count += 1
-        elif isinstance(segmentation, list) and segmentation:
+        is_mask = isinstance(segmentation, dict) or bool(ann.get("iscrowd"))
+        if not is_mask and isinstance(segmentation, list) and segmentation:
             polygon = _first_polygon(segmentation)
+
+        box = _box(ann.get("bbox"))
+        if box is None and polygon:
+            # No usable bbox, but an outline: the box is the outline's own.
+            xs, ys = [p[0] for p in polygon], [p[1] for p in polygon]
+            box = (min(xs), min(ys), max(xs), max(ys))
+        if box is None:
+            unusable += 1
+            continue
+        if is_mask:
+            rle_count += 1
+        elif polygon and sum(1 for part in segmentation if _is_ring(part)) > 1:
+            in_parts += 1
+
+        kind = ""
+        keypoints = ann.get("keypoints")
+        if (
+            polygon is None
+            and isinstance(keypoints, list)
+            and len(keypoints) == 3
+            and box[2] - box[0] <= 1
+            and box[3] - box[1] <= 1
+        ):
+            # One keypoint in a one-pixel box is how the writer here stores a
+            # point; read it back as the point it was, not as a tiny box.
+            point = _box([keypoints[0], keypoints[1], 0, 0])
+            if point is not None:
+                box, kind = point, "point"
 
         category = ann.get("category_id")
         annotation.shapes.append(
@@ -377,6 +404,7 @@ def to_annotations(
                 else f"class_{category}",
                 bbox=box,
                 polygon=polygon,
+                kind=kind,
                 # 'score' is what every detector writes and no ground-truth
                 # file has. Carrying it is what lets the review layer tell a
                 # prediction from a label rather than trusting a filename.
@@ -384,10 +412,17 @@ def to_annotations(
             )
         )
 
-    if rle_count and unsupported_out is not None:
-        unsupported_out.append(
-            f"{rle_count} RLE/crowd segmentation(s) kept as bounding boxes only"
+    if unsupported_out is not None:
+        counted = (
+            (rle_count, "RLE/crowd segmentation(s) kept as bounding boxes only"),
+            (orphans, "annotation(s) name an image that is not in 'images' and were skipped"),
+            (unusable, "annotation(s) have no usable bbox or outline and were skipped"),
+            (
+                in_parts,
+                "object(s) have an outline in several parts; only the first part of each was kept",
+            ),
         )
+        unsupported_out.extend(f"{count} {text}" for count, text in counted if count)
 
     # Recover sizes the document omitted, so a YOLO export downstream is not
     # left dividing by zero.
@@ -397,6 +432,19 @@ def to_annotations(
             annotation.height = max(s.bbox[3] for s in annotation.shapes) + 1
 
     return [by_image[k] for k in sorted(by_image, key=lambda k: by_image[k].filename)]
+
+
+def _box(raw: Any) -> tuple[int, int, int, int] | None:
+    """A COCO ``[x, y, width, height]`` as corners, or ``None`` if it is not one."""
+    try:
+        x, y, w, h = (float(v) for v in raw[:4])
+        return int(round(x)), int(round(y)), int(round(x + w)), int(round(y + h))
+    except (TypeError, ValueError, OverflowError):
+        return None
+
+
+def _is_ring(part: Any) -> bool:
+    return isinstance(part, list) and len(part) >= 6
 
 
 def _first_polygon(segmentation: list[Any]) -> list[Point] | None:
